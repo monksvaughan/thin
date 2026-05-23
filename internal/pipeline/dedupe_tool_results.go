@@ -1,0 +1,72 @@
+package pipeline
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+)
+
+// DedupeToolResults finds tool-result messages whose corresponding call
+// (function name + arguments) appears multiple times in history, and
+// replaces the older ones with a tiny stub pointing to the latest result.
+//
+// This catches the "agent re-read the same file four times" pattern that
+// the obviousworks.ch post called out as a major waste driver.
+//
+// Strategy:
+//   1. Walk messages, build a map of tool_call_id -> (fn_name, args_hash).
+//   2. For each tool result message (role=tool, tool_call_id=X), find the
+//      hash of that call.
+//   3. If we've seen the same hash with a later tool result already, replace
+//      this older message's content with a stub.
+//
+// We process from newest to oldest so the latest occurrence is the one
+// that gets kept in full.
+//
+// Returns the number of messages stubbed.
+func DedupeToolResults(req *ChatRequest) int {
+	// Index tool_call_id -> hash via the assistant messages.
+	hashByCallID := map[string]string{}
+	for _, m := range req.Messages {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			hashByCallID[tc.ID] = hashCall(tc.Function.Name, tc.Function.Arguments)
+		}
+	}
+
+	// Walk tool messages in reverse order; first sighting per hash wins.
+	seen := map[string]bool{}
+	stubbed := 0
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		m := &req.Messages[i]
+		if m.Role != "tool" || m.ToolCallID == "" {
+			continue
+		}
+		h, ok := hashByCallID[m.ToolCallID]
+		if !ok {
+			continue
+		}
+		if !seen[h] {
+			seen[h] = true
+			continue
+		}
+		// Older duplicate. Replace content with a stub.
+		stub, _ := json.Marshal(fmt.Sprintf(
+			"[deduplicated by proxy: identical tool call output appears later in this conversation]",
+		))
+		m.Content = stub
+		stubbed++
+	}
+	return stubbed
+}
+
+func hashCall(name, args string) string {
+	h := sha256.New()
+	h.Write([]byte(name))
+	h.Write([]byte{0})
+	h.Write([]byte(args))
+	return hex.EncodeToString(h.Sum(nil))
+}

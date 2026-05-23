@@ -1,0 +1,19 @@
+# Binaries
+/token-proxy
+/replay
+/gentestdata
+
+# SQLite metrics (default path) + WAL/SHM sidecars
+*.db
+*.db-shm
+*.db-wal
+
+# JetBrains
+/.idea/
+*.iml
+
+# Claude Code local settings
+/.claude/settings.local.json
+
+# OS
+.DS_Store

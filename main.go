@@ -1,0 +1,215 @@
+// Package main implements a token-optimizing HTTP proxy for LLM APIs.
+//
+// Design goals for this weekend prototype:
+//   - Zero model calls. All optimizations are pure string/JSON manipulation.
+//   - Honest measurement: log token counts before and after each pass so we
+//     can tell whether this is actually saving anything.
+//   - Minimal latency: every pass should be sub-millisecond; if it isn't,
+//     it doesn't ship.
+//   - OpenAI Chat Completions wire format on the client side. Most agentic
+//     coding tools speak this (or speak it via a shim).
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"io"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"time"
+
+	"github.com/you/token-proxy/internal/metrics"
+	"github.com/you/token-proxy/internal/pipeline"
+	"github.com/you/token-proxy/internal/session"
+)
+
+func main() {
+	var (
+		listen    = flag.String("listen", ":8080", "address to listen on")
+		upstream  = flag.String("upstream", "https://api.openai.com", "upstream LLM API base URL")
+		dbPath    = flag.String("db", "metrics.db", "SQLite path for metrics")
+		logLevel  = flag.String("log-level", "info", "log level: debug|info")
+		dryRun    = flag.Bool("dry-run", false, "measure but don't actually rewrite requests")
+	)
+	flag.Parse()
+
+	logger := log.New(os.Stdout, "[proxy] ", log.LstdFlags|log.Lmicroseconds)
+	if *logLevel == "debug" {
+		logger.Println("debug logging enabled")
+	}
+
+	upstreamURL, err := url.Parse(*upstream)
+	if err != nil {
+		logger.Fatalf("invalid upstream URL: %v", err)
+	}
+
+	store, err := metrics.Open(*dbPath)
+	if err != nil {
+		logger.Fatalf("open metrics db: %v", err)
+	}
+	defer store.Close()
+
+	sessions := session.NewStore()
+	pipe := pipeline.New(sessions, *dryRun)
+
+	rp := httputil.NewSingleHostReverseProxy(upstreamURL)
+	originalDirector := rp.Director
+	rp.Director = func(r *http.Request) {
+		originalDirector(r)
+		r.Host = upstreamURL.Host
+	}
+	// Stream SSE responses immediately — without this, the reverse proxy
+	// can buffer chunks and ruin the interactive feel of a coding agent.
+	rp.FlushInterval = -1
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		handleChatCompletions(w, r, rp, pipe, store, logger)
+	})
+	// Pass-through everything else so the proxy doesn't break other endpoints
+	// (models list, embeddings, etc.) while we focus on chat completions.
+	mux.Handle("/", rp)
+
+	srv := &http.Server{
+		Addr:              *listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	logger.Printf("listening on %s, upstream=%s, dry_run=%v", *listen, *upstream, *dryRun)
+	if err := srv.ListenAndServe(); err != nil {
+		logger.Fatalf("server: %v", err)
+	}
+}
+
+func handleChatCompletions(
+	w http.ResponseWriter,
+	r *http.Request,
+	rp *httputil.ReverseProxy,
+	pipe *pipeline.Pipeline,
+	store *metrics.Store,
+	logger *log.Logger,
+) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	requestStart := time.Now()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	_ = r.Body.Close()
+
+	var req pipeline.ChatRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		// Don't break the user's request if we can't parse it; pass through.
+		logger.Printf("parse error, passing through: %v", err)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		rp.ServeHTTP(w, r)
+		return
+	}
+
+	sessionID := session.IDFor(r, &req)
+
+	// Run the optimization pipeline.
+	result := pipe.Apply(sessionID, &req)
+
+	// Re-serialize for the upstream.
+	outBody, err := json.Marshal(result.Request)
+	if err != nil {
+		logger.Printf("marshal error, passing through original: %v", err)
+		outBody = body
+	}
+
+	// Persist measurement. Latency for the pipeline itself is tiny; we'll
+	// also measure the upstream call separately via a response capture.
+	pipelineLatency := time.Since(requestStart)
+
+	r.Body = io.NopCloser(bytes.NewReader(outBody))
+	r.ContentLength = int64(len(outBody))
+	r.Header.Set("Content-Length", "")
+
+	cap := &captureWriter{ResponseWriter: w}
+	upstreamStart := time.Now()
+	rp.ServeHTTP(cap, r)
+	upstreamLatency := time.Since(upstreamStart)
+
+	record := metrics.Record{
+		SessionID:        sessionID,
+		Timestamp:        requestStart,
+		Model:            req.Model,
+		TokensIn:         result.TokensInOriginal,
+		TokensInAfter:    result.TokensInAfter,
+		TokensOutEst:     cap.outputTokensEstimate(),
+		PipelineLatency:  pipelineLatency,
+		UpstreamLatency:  upstreamLatency,
+		PassesApplied:    result.PassesApplied,
+		BytesIn:          len(body),
+		BytesOut:         len(outBody),
+		StatusCode:       cap.status,
+	}
+	if err := store.Insert(record); err != nil {
+		logger.Printf("metrics insert: %v", err)
+	}
+
+	logger.Printf("session=%s model=%s in=%d->%d (-%.1f%%) passes=%v pipeline=%s upstream=%s",
+		sessionID, req.Model,
+		result.TokensInOriginal, result.TokensInAfter,
+		savingsPct(result.TokensInOriginal, result.TokensInAfter),
+		result.PassesApplied,
+		pipelineLatency, upstreamLatency,
+	)
+}
+
+func savingsPct(before, after int) float64 {
+	if before == 0 {
+		return 0
+	}
+	return float64(before-after) / float64(before) * 100
+}
+
+// captureWriter wraps http.ResponseWriter so we can read the status code and
+// approximate output token count for SSE/streaming bodies. Streaming bodies
+// are passed through to the client unchanged; we just tee for measurement.
+type captureWriter struct {
+	http.ResponseWriter
+	status    int
+	bodyBytes int
+}
+
+func (c *captureWriter) WriteHeader(code int) {
+	c.status = code
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *captureWriter) Write(b []byte) (int, error) {
+	c.bodyBytes += len(b)
+	return c.ResponseWriter.Write(b)
+}
+
+// outputTokensEstimate gives a rough output-token estimate from byte count.
+// For an honest production system we'd parse the final SSE chunk's usage
+// block (OpenAI sends it when stream_options.include_usage=true). For the
+// prototype, ~4 bytes/token is good enough to spot the order of magnitude.
+func (c *captureWriter) outputTokensEstimate() int {
+	return c.bodyBytes / 4
+}
+
+// Implement http.Flusher so streaming responses still stream.
+func (c *captureWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

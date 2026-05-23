@@ -23,6 +23,7 @@ import (
 
 	"github.com/you/token-proxy/internal/pipeline"
 	"github.com/you/token-proxy/internal/session"
+	"github.com/you/token-proxy/internal/tokens"
 )
 
 type sessionAgg struct {
@@ -36,7 +37,8 @@ type sessionAgg struct {
 
 func main() {
 	sessions := session.NewStore()
-	pipe := pipeline.New(sessions, false)
+	pipe := pipeline.New(sessions)
+	counter := tokens.New()
 
 	bySession := map[string]*sessionAgg{}
 	totalReq := 0
@@ -62,9 +64,16 @@ func main() {
 		// In replay we synthesize a session ID from request shape, same as
 		// the live proxy would.
 		sid := synthSessionID(&req)
+		tokensBefore := counter.CountString(string(line))
 		start := time.Now()
 		result := pipe.Apply(sid, &req)
 		dur := time.Since(start)
+		after, mErr := json.Marshal(result.Request)
+		if mErr != nil {
+			fmt.Fprintf(os.Stderr, "line %d: marshal: %v\n", lineNo, mErr)
+			continue
+		}
+		tokensAfter := counter.CountString(string(after))
 
 		agg, ok := bySession[sid]
 		if !ok {
@@ -72,8 +81,8 @@ func main() {
 			bySession[sid] = agg
 		}
 		agg.turns++
-		agg.tokensBefore += result.TokensInOriginal
-		agg.tokensAfter += result.TokensInAfter
+		agg.tokensBefore += tokensBefore
+		agg.tokensAfter += tokensAfter
 		agg.sumLatency += dur
 		if dur > agg.maxLatency {
 			agg.maxLatency = dur
@@ -83,8 +92,8 @@ func main() {
 		}
 
 		totalReq++
-		totalBefore += result.TokensInOriginal
-		totalAfter += result.TokensInAfter
+		totalBefore += tokensBefore
+		totalAfter += tokensAfter
 		totalLatency += dur
 	}
 	if err := scanner.Err(); err != nil {

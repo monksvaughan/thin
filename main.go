@@ -25,7 +25,13 @@ import (
 	"github.com/you/token-proxy/internal/metrics"
 	"github.com/you/token-proxy/internal/pipeline"
 	"github.com/you/token-proxy/internal/session"
+	"github.com/you/token-proxy/internal/tokens"
 )
+
+// maxRequestBytes caps the body we'll read from a client. Chat-completions
+// requests are routinely a few hundred KB (long histories, big tool schemas);
+// anything well above that is almost certainly abuse.
+const maxRequestBytes = 10 << 20 // 10 MiB
 
 func main() {
 	var (
@@ -54,7 +60,8 @@ func main() {
 	defer store.Close()
 
 	sessions := session.NewStore()
-	pipe := pipeline.New(sessions, *dryRun)
+	pipe := pipeline.New(sessions)
+	counter := tokens.New()
 
 	rp := httputil.NewSingleHostReverseProxy(upstreamURL)
 	originalDirector := rp.Director
@@ -72,7 +79,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		handleChatCompletions(w, r, rp, pipe, store, logger)
+		handleChatCompletions(w, r, rp, pipe, counter, store, logger, *dryRun)
 	})
 	// Pass-through everything else so the proxy doesn't break other endpoints
 	// (models list, embeddings, etc.) while we focus on chat completions.
@@ -94,8 +101,10 @@ func handleChatCompletions(
 	r *http.Request,
 	rp *httputil.ReverseProxy,
 	pipe *pipeline.Pipeline,
+	counter *tokens.Counter,
 	store *metrics.Store,
 	logger *log.Logger,
+	dryRun bool,
 ) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -104,6 +113,7 @@ func handleChatCompletions(
 
 	requestStart := time.Now()
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
@@ -123,42 +133,52 @@ func handleChatCompletions(
 
 	sessionID := session.IDFor(r, &req)
 
-	// Run the optimization pipeline.
+	// Time the passes alone — this is the number the 5ms p95 target is
+	// measured against. Body read, parse, and re-marshal are proxy overhead,
+	// not pipeline cost.
+	passStart := time.Now()
 	result := pipe.Apply(sessionID, &req)
+	passLatency := time.Since(passStart)
 
-	// Re-serialize for the upstream.
+	// Marshal the optimized form. In dry-run we forward the original bytes
+	// but still need outBody for the after-token-count.
 	outBody, err := json.Marshal(result.Request)
 	if err != nil {
 		logger.Printf("marshal error, passing through original: %v", err)
 		outBody = body
 	}
 
-	// Persist measurement. Latency for the pipeline itself is tiny; we'll
-	// also measure the upstream call separately via a response capture.
-	pipelineLatency := time.Since(requestStart)
-
-	r.Body = io.NopCloser(bytes.NewReader(outBody))
-	r.ContentLength = int64(len(outBody))
-	r.Header.Set("Content-Length", "")
+	forwardBody := outBody
+	if dryRun {
+		forwardBody = body
+	}
+	r.Body = io.NopCloser(bytes.NewReader(forwardBody))
+	r.ContentLength = int64(len(forwardBody))
+	r.Header.Del("Content-Length")
 
 	cap := &captureWriter{ResponseWriter: w}
 	upstreamStart := time.Now()
 	rp.ServeHTTP(cap, r)
 	upstreamLatency := time.Since(upstreamStart)
 
+	// Count tokens off the request path: the client has already received its
+	// response by the time we get here, so this latency doesn't reach them.
+	tokensIn := counter.CountString(string(body))
+	tokensInAfter := counter.CountString(string(outBody))
+
 	record := metrics.Record{
-		SessionID:        sessionID,
-		Timestamp:        requestStart,
-		Model:            req.Model,
-		TokensIn:         result.TokensInOriginal,
-		TokensInAfter:    result.TokensInAfter,
-		TokensOutEst:     cap.outputTokensEstimate(),
-		PipelineLatency:  pipelineLatency,
-		UpstreamLatency:  upstreamLatency,
-		PassesApplied:    result.PassesApplied,
-		BytesIn:          len(body),
-		BytesOut:         len(outBody),
-		StatusCode:       cap.status,
+		SessionID:       sessionID,
+		Timestamp:       requestStart,
+		Model:           req.Model,
+		TokensIn:        tokensIn,
+		TokensInAfter:   tokensInAfter,
+		TokensOutEst:    cap.outputTokensEstimate(),
+		PipelineLatency: passLatency,
+		UpstreamLatency: upstreamLatency,
+		PassesApplied:   result.PassesApplied,
+		BytesIn:         len(body),
+		BytesOut:        len(outBody),
+		StatusCode:      cap.status,
 	}
 	if err := store.Insert(record); err != nil {
 		logger.Printf("metrics insert: %v", err)
@@ -166,10 +186,9 @@ func handleChatCompletions(
 
 	logger.Printf("session=%s model=%s in=%d->%d (-%.1f%%) passes=%v pipeline=%s upstream=%s",
 		sessionID, req.Model,
-		result.TokensInOriginal, result.TokensInAfter,
-		savingsPct(result.TokensInOriginal, result.TokensInAfter),
+		tokensIn, tokensInAfter, savingsPct(tokensIn, tokensInAfter),
 		result.PassesApplied,
-		pipelineLatency, upstreamLatency,
+		passLatency, upstreamLatency,
 	)
 }
 

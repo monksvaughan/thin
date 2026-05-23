@@ -41,9 +41,11 @@ func Open(path string) (*Store, error) {
 	// SQLite single-writer assumption: keep a small pool, enable WAL.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -76,7 +77,7 @@ func compactMessage(m *Message) bool {
 		omitted := len(s) - toolOutputHead - toolOutputTail
 		s = head +
 			"\n\n... [" +
-			itoa(omitted) +
+			strconv.Itoa(omitted) +
 			" chars elided by proxy — old tool output, full version not retained] ...\n\n" +
 			tail
 	}
@@ -91,27 +92,4 @@ func compactMessage(m *Message) bool {
 	}
 	m.Content = enc
 	return true
-}
-
-func itoa(n int) string {
-	// Tiny helper, avoids strconv import here.
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
 }

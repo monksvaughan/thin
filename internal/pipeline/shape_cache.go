@@ -34,7 +34,6 @@ func ShapeForCache(req *ChatRequest, sess *session.Session) bool {
 		}
 		stable++
 	}
-	sess.RecordStablePrefix(stable)
 	sess.RecordMessageFingerprints(cur)
 
 	return stable > 0

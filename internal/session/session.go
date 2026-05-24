@@ -44,10 +44,7 @@ func (s *Store) Get(id string) *Session {
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[id]
 	if !ok {
-		sess = &Session{
-			id:        id,
-			toolsUsed: map[string]int{},
-		}
+		sess = &Session{toolsUsed: map[string]int{}}
 		s.sessions[id] = sess
 	}
 	return sess
@@ -55,12 +52,10 @@ func (s *Store) Get(id string) *Session {
 
 // Session holds optimization state for one logical conversation.
 type Session struct {
-	mu                sync.Mutex
-	id                string
-	turns             int
-	toolsUsed         map[string]int // name -> count
-	lastFingerprints  []uint64
-	lastStablePrefix  int
+	mu               sync.Mutex
+	turns            int
+	toolsUsed        map[string]int // name -> count
+	lastFingerprints []uint64
 }
 
 // Turns returns the number of times this session has been observed.
@@ -77,39 +72,16 @@ func (s *Session) HasUsedTool(name string) bool {
 	return s.toolsUsed[name] > 0
 }
 
-// ObserveToolCalls walks the messages of an incoming request and records
-// every tool_call name. Also increments the turn counter. This is the only
-// place that mutates per-session tool-usage state.
-//
-// We accept the messages as a generic slice via reflection on a known
-// shape to avoid an import cycle.
-func (s *Session) ObserveToolCalls(messages any) {
+// ObserveToolCalls increments the turn counter and records every tool-call
+// name the caller has extracted from the current request's history. Caller
+// (pipeline) does the extraction so this package doesn't have to know about
+// the request schema — and so we avoid a JSON re-marshal on the hot path.
+func (s *Session) ObserveToolCalls(toolCallNames []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.turns++
-
-	type tc struct {
-		Function struct {
-			Name string `json:"name"`
-		} `json:"function"`
-	}
-	type msg struct {
-		ToolCalls []tc `json:"tool_calls"`
-	}
-	// Re-serialize and parse; cheap for the message volume we expect and
-	// avoids us tightly coupling to the pipeline package.
-	b, err := json.Marshal(messages)
-	if err != nil {
-		return
-	}
-	var ms []msg
-	if err := json.Unmarshal(b, &ms); err != nil {
-		return
-	}
-	for _, m := range ms {
-		for _, c := range m.ToolCalls {
-			s.toolsUsed[c.Function.Name]++
-		}
+	for _, name := range toolCallNames {
+		s.toolsUsed[name]++
 	}
 }
 
@@ -131,14 +103,6 @@ func (s *Session) RecordMessageFingerprints(fps []uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastFingerprints = fps
-}
-
-// RecordStablePrefix stores the length of the stable prefix detected this
-// turn. Useful for the metrics reporter.
-func (s *Session) RecordStablePrefix(n int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastStablePrefix = n
 }
 
 // IDFor derives a stable session ID from a request. It uses, in order of

@@ -10,8 +10,8 @@
 // Usage:
 //   cat requests.jsonl | go run ./cmd/replay
 //
-// JSONL format: one request body per line. The proxy logs raw bodies if
-// you set -log-level=debug, or you can capture them with any HTTP recorder.
+// JSONL format: one request body per line. Capture them with any HTTP
+// recorder (mitmproxy, httpyac, etc.) — the proxy itself only logs metadata.
 package main
 
 import (

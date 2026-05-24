@@ -35,7 +35,7 @@ func (p *Pipeline) Apply(sessionID string, req *ChatRequest) Result {
 
 	// Bookkeeping: record tool-call names from history. Other passes
 	// (prune_tools) depend on this running first.
-	sess.ObserveToolCalls(req.Messages)
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
 
 	// Drop tool definitions the session has never invoked. Gated by
 	// minObservedTurnsForPrune so we never silently break a tool's first use.
@@ -62,4 +62,16 @@ func (p *Pipeline) Apply(sessionID string, req *ChatRequest) Result {
 	}
 
 	return result
+}
+
+// ToolCallNames returns every tool-call name across msgs, in message order.
+// Exposed for tests that drive session bookkeeping directly.
+func ToolCallNames(msgs []Message) []string {
+	var out []string
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			out = append(out, tc.Function.Name)
+		}
+	}
+	return out
 }

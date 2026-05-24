@@ -26,7 +26,7 @@ func TestPruneTools_keepsAllOnEarlyTurns(t *testing.T) {
 			{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
 		},
 	}
-	sess.ObserveToolCalls(req.Messages)
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
 	if pruned := PruneTools(req, sess); pruned != 0 {
 		t.Fatalf("expected 0 pruned on turn 1, got %d", pruned)
 	}
@@ -57,7 +57,7 @@ func TestPruneTools_dropsUnusedAfterEnoughTurns(t *testing.T) {
 				{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
 			},
 		}
-		sess.ObserveToolCalls(req.Messages)
+		sess.ObserveToolCalls(ToolCallNames(req.Messages))
 		_ = PruneTools(req, sess)
 	}
 	// Now check the final turn pruned delete_repo.
@@ -68,7 +68,7 @@ func TestPruneTools_dropsUnusedAfterEnoughTurns(t *testing.T) {
 			{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
 		},
 	}
-	sess.ObserveToolCalls(req.Messages)
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
 	pruned := PruneTools(req, sess)
 	if pruned != 1 {
 		t.Fatalf("expected 1 pruned, got %d", pruned)

@@ -35,18 +35,14 @@ const maxRequestBytes = 10 << 20 // 10 MiB
 
 func main() {
 	var (
-		listen    = flag.String("listen", ":8080", "address to listen on")
-		upstream  = flag.String("upstream", "https://api.openai.com", "upstream LLM API base URL")
-		dbPath    = flag.String("db", "metrics.db", "SQLite path for metrics")
-		logLevel  = flag.String("log-level", "info", "log level: debug|info")
-		dryRun    = flag.Bool("dry-run", false, "measure but don't actually rewrite requests")
+		listen   = flag.String("listen", ":8080", "address to listen on")
+		upstream = flag.String("upstream", "https://api.openai.com", "upstream LLM API base URL")
+		dbPath   = flag.String("db", "metrics.db", "SQLite path for metrics")
+		dryRun   = flag.Bool("dry-run", false, "measure but don't actually rewrite requests")
 	)
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "[proxy] ", log.LstdFlags|log.Lmicroseconds)
-	if *logLevel == "debug" {
-		logger.Println("debug logging enabled")
-	}
 
 	upstreamURL, err := url.Parse(*upstream)
 	if err != nil {

@@ -30,11 +30,12 @@ cat test.jsonl | go run ./cmd/replay
 
 Request lifecycle (`main.go:handleChatCompletions`):
 
-1. Read body → unmarshal into `pipeline.ChatRequest`. Parse failures fall through to the reverse proxy unchanged.
+1. Read body (capped at 10 MiB by `http.MaxBytesReader`) → unmarshal into `pipeline.ChatRequest`. Parse failures fall through to the reverse proxy unchanged.
 2. Derive session ID (`session.IDFor`): prefers `X-Session-Id` header, else hashes model + first system + first user message. Same conversation gets the same ID without client cooperation.
-3. `pipeline.Apply` runs the passes in order, mutating the request in place. In `-dry-run`, the original is restored before forwarding but metrics still reflect what *would* have changed.
-4. Re-serialize, forward via `httputil.ReverseProxy` (FlushInterval=-1 so SSE isn't buffered), capture status + byte count via `captureWriter`.
-5. Insert one row into `metrics.db`.
+3. `pipeline.Apply` runs the passes in order, mutating the request in place. `PipelineLatency` is timed around this call only — it's the number the 5ms p95 target measures.
+4. Re-serialize → `outBody`. In `-dry-run`, forward the original bytes; otherwise forward `outBody`. Either way, `outBody` is what gets counted for `tokens_in_after`.
+5. Forward via `httputil.ReverseProxy` (FlushInterval=-1 so SSE isn't buffered), capture status + byte count via `captureWriter`.
+6. **After** the client has its response, tokenize `body` and `outBody` and insert one row into `metrics.db`. Token counting deliberately happens off the request path — tiktoken-encoding a 20KB body takes milliseconds and the client shouldn't wait for it.
 
 Pass pipeline (`internal/pipeline/pipeline.go`, order is load-bearing):
 
@@ -46,20 +47,20 @@ Pass pipeline (`internal/pipeline/pipeline.go`, order is load-bearing):
 
 ### Things that are easy to break
 
-- **`ChatRequest.Extra` round-trips unknown top-level fields.** Custom `UnmarshalJSON`/`MarshalJSON` in `internal/pipeline/types.go` siphon anything not in `knownTopLevelFields` into `Extra` and write it back out. If you add a new top-level field to the struct, also add it to `knownTopLevelFields` or it'll get double-serialized.
+- **`ChatRequest`, `Tool`, and `ToolFunction` round-trip unknown fields via per-type `Extra` maps.** Custom `Unmarshal/MarshalJSON` in `internal/pipeline/types.go` siphon any field not in the corresponding `known*Fields` allowlist into `Extra` and write it back out. If you add a field to one of these structs, also add it to its allowlist or it'll get double-serialized.
 - **`Message.Content` is `json.RawMessage`.** It can be a string OR a multimodal/parts array OR Anthropic-style blocks with `cache_control`. Passes that need string content (e.g. `compact_history`) must `json.Unmarshal` into a string and skip on error — do not assume string content.
-- **`session.ObserveToolCalls` takes `any` and re-marshals.** This is deliberate to dodge an import cycle with `pipeline`. Don't tighten the type — it'll create the cycle.
+- **`session.ObserveToolCalls` takes `[]string`.** Caller (pipeline) extracts the names via `ToolCallNames(msgs)`. This keeps the session package free of the request schema and avoids any per-request marshaling on the hot path.
 - **Session state is in-memory only.** Restart = forget. The `prune_tools` gate at 3 turns means a restart causes a few unpruned-but-correct turns, not breakage.
-- **Token counting uses `cl100k_base` for everything.** Deltas are trustworthy; absolute counts for Anthropic models are off by a constant factor. Don't lean on absolute counts in tests or analyses; compare before/after on the same tokenizer.
-- **Latency budget is tight.** p95 <5ms across the whole pipeline. New passes need to stay sub-millisecond or they don't ship; this is product policy, not a soft guideline.
+- **Token counting uses `cl100k_base` for everything** and runs **after** `rp.ServeHTTP` returns — the client never waits for it. Deltas are trustworthy; absolute counts for Anthropic models are off by a constant factor. Don't lean on absolute counts in tests or analyses; compare before/after on the same tokenizer.
+- **Latency budget is tight.** p95 <5ms for `PipelineLatency` (the passes only — not body read, parse, or re-marshal). New passes need to stay sub-millisecond or they don't ship; this is product policy, not a soft guideline.
 - **Fall-through on parse failure is intentional.** If we can't confidently parse a request, we forward it untouched rather than risk breaking the user's agent loop. Preserve this behavior in any new pass.
 
 ### Module layout
 
 - `main.go` — HTTP server, request lifecycle, reverse proxy, metrics capture.
-- `internal/pipeline/` — pass implementations + `ChatRequest`/`Message`/`Tool` schema. All passes are pure functions over `*ChatRequest` (plus session state for `prune_tools`/`shape_cache`).
-- `internal/session/` — per-session tool-usage counters, message fingerprints, ID derivation. Thread-safe via `sync.Mutex`.
-- `internal/tokens/` — `tiktoken-go` wrapper with a byte-count fallback so a tokenizer load failure can't take the proxy down.
+- `internal/pipeline/` — pass implementations + `ChatRequest`/`Message`/`Tool` schema. All passes are pure functions over `*ChatRequest` (plus session state for `prune_tools`/`shape_cache`). `Pipeline` itself owns no `Counter` — counting is the caller's job and happens off the request path.
+- `internal/session/` — per-session tool-usage counters, message fingerprints, ID derivation. Thread-safe via `sync.Mutex`. Knows nothing about the request schema; callers pass primitives.
+- `internal/tokens/` — `tiktoken-go` wrapper with a byte-count fallback so a tokenizer load failure can't take the proxy down. The first call lazily loads `cl100k_base` (~50ms one-time cost) — since counting runs after `rp.ServeHTTP`, this never blocks a client.
 - `internal/metrics/` — SQLite (`modernc.org/sqlite`, pure Go) persistence. WAL mode, single writer.
 - `cmd/replay/` — runs JSONL of recorded requests through the pipeline offline, prints per-session and aggregate savings. Use this to validate changes against real traffic without making upstream calls.
 - `cmd/gentestdata/` — synthesizes a 10-turn coding-agent conversation with the waste patterns the passes target (30 tools / 3 used, repeated file reads, long stack traces). Pipe into `cmd/replay` for a smoke test.

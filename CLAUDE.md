@@ -40,10 +40,12 @@ Request lifecycle (`main.go:handleChatCompletions`):
 Pass pipeline (`internal/pipeline/pipeline.go`, order is load-bearing):
 
 1. `session.ObserveToolCalls` — bookkeeping; records which tool names appeared in this turn's history. Other passes depend on this.
-2. `PruneTools` — drops tool schemas the session has never called. Gated by `minObservedTurnsForPrune = 3`; never prunes on early turns because a tool used for the first time would be silently lost.
+2. `PruneTools` — drops tool schemas the session has never called. Gated by `minObservedTurnsForPrune = 3` and **also** by `sess.LastCacheHit()`: if the previous upstream response showed a prompt-cache hit, we skip pruning because changing the tools array would invalidate the cached prefix and re-pay full price. The cache already does the work pruning would do.
 3. `DedupeToolResults` — when the same `(function name, arguments)` pair appears multiple times in history, replaces older results with a one-line stub. Walks newest-to-oldest so the latest occurrence is kept intact.
 4. `CompactHistory` — whitespace cleanup on all old messages; head+tail truncation only on `role=tool` messages over 4KB. Leaves the last `recencyWindow = 6` messages untouched.
 5. `ShapeForCache` — **measurement-only in v1, does not mutate**. Identifies the stable prefix across turns via per-message FNV fingerprints stored on the session. v2 would insert Anthropic `cache_control` here, but that field is rejected by OpenAI upstreams and v1 must run against both.
+
+Cache-hit signal (`internal/usage/`): after `rp.ServeHTTP` returns, we scan the last ~8KB of the response body for `"cached_tokens":N` (OpenAI shape) or `"cache_read_input_tokens":N` (Anthropic shape, if a shim passes it through). The tail covers both non-streaming JSON and the final SSE chunk. If no signal is present we leave the session's `lastCacheHit` unchanged — fail-open, so clients that don't surface usage keep today's aggressive prune behavior.
 
 ### Things that are easy to break
 
@@ -59,7 +61,8 @@ Pass pipeline (`internal/pipeline/pipeline.go`, order is load-bearing):
 
 - `main.go` — HTTP server, request lifecycle, reverse proxy, metrics capture.
 - `internal/pipeline/` — pass implementations + `ChatRequest`/`Message`/`Tool` schema. All passes are pure functions over `*ChatRequest` (plus session state for `prune_tools`/`shape_cache`). `Pipeline` itself owns no `Counter` — counting is the caller's job and happens off the request path.
-- `internal/session/` — per-session tool-usage counters, message fingerprints, ID derivation. Thread-safe via `sync.Mutex`. Knows nothing about the request schema; callers pass primitives.
+- `internal/session/` — per-session tool-usage counters, message fingerprints, cache-hit signal, ID derivation. Thread-safe via `sync.Mutex`. Knows nothing about the request schema; callers pass primitives.
+- `internal/usage/` — extracts `cached_tokens` from upstream responses (either complete JSON or a streamed SSE tail). Substring-scans rather than JSON-parses so a truncated tail doesn't fail.
 - `internal/tokens/` — `tiktoken-go` wrapper with a byte-count fallback so a tokenizer load failure can't take the proxy down. The first call lazily loads `cl100k_base` (~50ms one-time cost) — since counting runs after `rp.ServeHTTP`, this never blocks a client.
 - `internal/metrics/` — SQLite (`modernc.org/sqlite`, pure Go) persistence. WAL mode, single writer.
 - `cmd/replay/` — runs JSONL of recorded requests through the pipeline offline, prints per-session and aggregate savings. Use this to validate changes against real traffic without making upstream calls.

@@ -56,6 +56,7 @@ type Session struct {
 	turns            int
 	toolsUsed        map[string]int // name -> count
 	lastFingerprints []uint64
+	lastCacheHit     bool // last response had cached_tokens > 0
 }
 
 // Turns returns the number of times this session has been observed.
@@ -103,6 +104,25 @@ func (s *Session) RecordMessageFingerprints(fps []uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastFingerprints = fps
+}
+
+// RecordCacheHit notes whether the most recent upstream response showed a
+// prompt-cache hit. Used by prune_tools to skip pruning when the cache is
+// already paying for itself — changing the tools array would bust the
+// cached prefix and re-pay full price.
+func (s *Session) RecordCacheHit(hit bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastCacheHit = hit
+}
+
+// LastCacheHit reports whether the most recent observed response was a
+// cache hit. Defaults to false before any response is recorded — that's
+// the fail-open behavior: when we have no signal, prune normally.
+func (s *Session) LastCacheHit() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastCacheHit
 }
 
 // IDFor derives a stable session ID from a request. It uses, in order of

@@ -115,6 +115,7 @@ SELECT
   SUM(tokens_in)                                                       AS before,
   SUM(tokens_in_after)                                                 AS after,
   ROUND(100.0*(SUM(tokens_in)-SUM(tokens_in_after))/SUM(tokens_in),1)  AS save_pct,
+  ROUND(100.0*SUM(cache_hit)/COUNT(*),0)                               AS cache_pct,
   ROUND(AVG(pipeline_latency_us)/1000.0,2)                             AS pipe_ms
 FROM requests
 GROUP BY session_id
@@ -125,12 +126,19 @@ LIMIT 15;
 SELECT
   COUNT(*)                                                                          AS total_requests,
   ROUND(100.0*(SUM(tokens_in)-SUM(tokens_in_after))/NULLIF(SUM(tokens_in),0),1)     AS overall_save_pct,
+  ROUND(100.0*SUM(cache_hit)/COUNT(*),0)                                            AS overall_cache_pct,
   (SELECT pipeline_latency_us FROM requests
     ORDER BY pipeline_latency_us
     LIMIT 1 OFFSET (SELECT COUNT(*)*95/100 FROM requests))                          AS p95_pipeline_us
 FROM requests;
 SQL
 ```
+
+The `cache_pct` column shows the share of requests in each session that
+hit the upstream's prompt cache. When it's high, `prune_tools` is
+intentionally skipped to preserve the cached prefix — expect lower
+`save_pct` and that's correct: the cache discount on the cached portion
+is bigger than the local prune savings would be.
 
 On demand:
 

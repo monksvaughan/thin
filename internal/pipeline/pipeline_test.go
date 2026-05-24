@@ -35,6 +35,67 @@ func TestPruneTools_keepsAllOnEarlyTurns(t *testing.T) {
 	}
 }
 
+// Adaptive prune: when the upstream is hitting its prompt cache, dropping
+// tools would change the cached prefix and re-pay full price. The cache is
+// already doing the work pruning would do — leave the tools alone.
+func TestPruneTools_skipsWhenCacheHit(t *testing.T) {
+	sess := session.NewStore().Get("cache-hit")
+
+	usedCall := Message{
+		Role: "assistant",
+		ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function",
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "read_file", Arguments: `{"path":"x"}`},
+		}},
+	}
+	// Get past the observation gate (3 turns) with read_file as the only
+	// used tool — delete_repo would normally be pruned at turn 4.
+	for i := 0; i < minObservedTurnsForPrune+1; i++ {
+		req := &ChatRequest{
+			Messages: []Message{usedCall},
+			Tools: []Tool{
+				{Type: "function", Function: ToolFunction{Name: "read_file"}},
+				{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
+			},
+		}
+		sess.ObserveToolCalls(ToolCallNames(req.Messages))
+		_ = PruneTools(req, sess)
+	}
+	// Last turn's response was a cache hit — prune_tools should now skip.
+	sess.RecordCacheHit(true)
+	req := &ChatRequest{
+		Messages: []Message{usedCall},
+		Tools: []Tool{
+			{Type: "function", Function: ToolFunction{Name: "read_file"}},
+			{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
+		},
+	}
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
+	if pruned := PruneTools(req, sess); pruned != 0 {
+		t.Fatalf("expected 0 pruned with cache hit, got %d", pruned)
+	}
+	if len(req.Tools) != 2 {
+		t.Fatalf("both tools should be kept when cache hit, got %d", len(req.Tools))
+	}
+
+	// Cache miss next turn — pruning resumes.
+	sess.RecordCacheHit(false)
+	req = &ChatRequest{
+		Messages: []Message{usedCall},
+		Tools: []Tool{
+			{Type: "function", Function: ToolFunction{Name: "read_file"}},
+			{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
+		},
+	}
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
+	if pruned := PruneTools(req, sess); pruned != 1 {
+		t.Fatalf("expected 1 pruned after cache miss, got %d", pruned)
+	}
+}
+
 func TestPruneTools_dropsUnusedAfterEnoughTurns(t *testing.T) {
 	sess := session.NewStore().Get("s2")
 

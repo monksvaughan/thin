@@ -26,12 +26,18 @@ import (
 	"github.com/you/token-proxy/internal/pipeline"
 	"github.com/you/token-proxy/internal/session"
 	"github.com/you/token-proxy/internal/tokens"
+	"github.com/you/token-proxy/internal/usage"
 )
 
 // maxRequestBytes caps the body we'll read from a client. Chat-completions
 // requests are routinely a few hundred KB (long histories, big tool schemas);
 // anything well above that is almost certainly abuse.
 const maxRequestBytes = 10 << 20 // 10 MiB
+
+// responseTailBytes is how much of each upstream response we keep around
+// for usage-block extraction. Big enough to catch the final SSE chunk on
+// any sane response; small enough not to matter for memory.
+const responseTailBytes = 8192
 
 func main() {
 	var (
@@ -75,7 +81,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		handleChatCompletions(w, r, rp, pipe, counter, store, logger, *dryRun)
+		handleChatCompletions(w, r, rp, pipe, sessions, counter, store, logger, *dryRun)
 	})
 	// Pass-through everything else so the proxy doesn't break other endpoints
 	// (models list, embeddings, etc.) while we focus on chat completions.
@@ -97,6 +103,7 @@ func handleChatCompletions(
 	r *http.Request,
 	rp *httputil.ReverseProxy,
 	pipe *pipeline.Pipeline,
+	sessions *session.Store,
 	counter *tokens.Counter,
 	store *metrics.Store,
 	logger *log.Logger,
@@ -152,10 +159,25 @@ func handleChatCompletions(
 	r.ContentLength = int64(len(forwardBody))
 	r.Header.Del("Content-Length")
 
-	cap := &captureWriter{ResponseWriter: w}
+	cap := &captureWriter{
+		ResponseWriter: w,
+		tail:           make([]byte, 0, responseTailBytes),
+	}
 	upstreamStart := time.Now()
 	rp.ServeHTTP(cap, r)
 	upstreamLatency := time.Since(upstreamStart)
+
+	// Extract the upstream's cache signal from the response tail and record
+	// it on the session so the next turn's prune_tools can decide whether
+	// to fire. If we couldn't find a signal we leave the previous value in
+	// place — fail-open: when we have no signal, the next turn will prune
+	// like today (the default lastCacheHit is false on a fresh session).
+	sess := sessions.Get(sessionID)
+	cacheHit := sess.LastCacheHit()
+	if n, ok := usage.ExtractCacheHit(cap.tail); ok {
+		cacheHit = n > 0
+		sess.RecordCacheHit(cacheHit)
+	}
 
 	// Count tokens off the request path: the client has already received its
 	// response by the time we get here, so this latency doesn't reach them.
@@ -175,15 +197,17 @@ func handleChatCompletions(
 		BytesIn:         len(body),
 		BytesOut:        len(outBody),
 		StatusCode:      cap.status,
+		CacheHit:        cacheHit,
 	}
 	if err := store.Insert(record); err != nil {
 		logger.Printf("metrics insert: %v", err)
 	}
 
-	logger.Printf("session=%s model=%s in=%d->%d (-%.1f%%) passes=%v pipeline=%s upstream=%s",
+	logger.Printf("session=%s model=%s in=%d->%d (-%.1f%%) passes=%v cache_hit=%t pipeline=%s upstream=%s",
 		sessionID, req.Model,
 		tokensIn, tokensInAfter, savingsPct(tokensIn, tokensInAfter),
 		result.PassesApplied,
+		cacheHit,
 		passLatency, upstreamLatency,
 	)
 }
@@ -195,13 +219,16 @@ func savingsPct(before, after int) float64 {
 	return float64(before-after) / float64(before) * 100
 }
 
-// captureWriter wraps http.ResponseWriter so we can read the status code and
-// approximate output token count for SSE/streaming bodies. Streaming bodies
-// are passed through to the client unchanged; we just tee for measurement.
+// captureWriter wraps http.ResponseWriter so we can read the status code,
+// approximate output token count, and the tail of the body. The tail lets
+// us extract the upstream's usage block (in particular cached_tokens) after
+// rp.ServeHTTP returns. Streaming bodies pass through to the client
+// unchanged; we just tee for measurement.
 type captureWriter struct {
 	http.ResponseWriter
 	status    int
 	bodyBytes int
+	tail      []byte // sliding window of the last responseTailBytes bytes
 }
 
 func (c *captureWriter) WriteHeader(code int) {
@@ -211,6 +238,19 @@ func (c *captureWriter) WriteHeader(code int) {
 
 func (c *captureWriter) Write(b []byte) (int, error) {
 	c.bodyBytes += len(b)
+	// Maintain a sliding tail of the last responseTailBytes bytes. We don't
+	// care about the head — usage blocks live near the end (final SSE chunk
+	// for streaming; whole body for non-streaming, which is typically small).
+	if len(b) >= responseTailBytes {
+		c.tail = append(c.tail[:0], b[len(b)-responseTailBytes:]...)
+	} else {
+		c.tail = append(c.tail, b...)
+		if len(c.tail) > responseTailBytes {
+			excess := len(c.tail) - responseTailBytes
+			copy(c.tail, c.tail[excess:])
+			c.tail = c.tail[:responseTailBytes]
+		}
+	}
 	return c.ResponseWriter.Write(b)
 }
 

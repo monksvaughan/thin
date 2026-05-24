@@ -28,6 +28,13 @@ func PruneTools(req *ChatRequest, sess *session.Session) int {
 	if sess.Turns() < minObservedTurnsForPrune {
 		return 0
 	}
+	// Adaptive: if the previous response showed a prompt-cache hit, dropping
+	// tools now would change the cached prefix and bust the cache, re-paying
+	// full price for the new shape. The cache is already doing the work we'd
+	// otherwise do here; don't undermine it.
+	if sess.LastCacheHit() {
+		return 0
+	}
 
 	// Collect tools called in this exact request (belt + braces; the
 	// session bookkeeping already covers history but be defensive).

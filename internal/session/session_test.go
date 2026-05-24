@@ -96,6 +96,24 @@ func TestStore_GetReturnsSameSessionPerId(t *testing.T) {
 	}
 }
 
+// Cache-hit state defaults to false (fail-open: prune normally when we
+// have no signal). After RecordCacheHit(true), LastCacheHit reports it;
+// recording false flips it back. Adaptive prune_tools relies on this.
+func TestCacheHit_DefaultsFalseAndRoundTrips(t *testing.T) {
+	sess := NewStore().Get("s")
+	if sess.LastCacheHit() {
+		t.Fatal("fresh session should default to no cache hit")
+	}
+	sess.RecordCacheHit(true)
+	if !sess.LastCacheHit() {
+		t.Fatal("expected true after RecordCacheHit(true)")
+	}
+	sess.RecordCacheHit(false)
+	if sess.LastCacheHit() {
+		t.Fatal("expected false after RecordCacheHit(false)")
+	}
+}
+
 // The returned slice must be a copy — callers can't be allowed to mutate
 // per-session state through the read API.
 func TestRecordMessageFingerprints_ReturnsCopy(t *testing.T) {

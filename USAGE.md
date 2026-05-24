@@ -1,0 +1,157 @@
+# Usage
+
+Operator's guide for the proxy. For project context and the savings/latency
+targets, see [README.md](README.md).
+
+## Build
+
+```bash
+go build -o ./token-proxy .
+```
+
+Single static binary, ~15 MB. No CGo (SQLite is `modernc.org/sqlite`).
+
+## Run
+
+Start in dry-run for the first few sessions. Dry-run forwards the
+*original* bytes upstream but still records what would have been saved —
+no risk to the conversation, real numbers in `metrics.db`.
+
+```bash
+./token-proxy \
+  -listen :8080 \
+  -upstream https://api.openai.com \
+  -db ./metrics.db \
+  -dry-run
+```
+
+When you trust the numbers, drop `-dry-run`.
+
+Common upstreams:
+
+| Upstream                | URL                                                          |
+| ----------------------- | ------------------------------------------------------------ |
+| OpenAI                  | `https://api.openai.com`                                     |
+| Gemini (OpenAI-compat)  | `https://generativelanguage.googleapis.com/v1beta/openai`    |
+| Anthropic via shim      | `http://<your-litellm-or-similar>:<port>`                    |
+| Local llama.cpp / Ollama | `http://localhost:<port>`                                   |
+
+The proxy forwards `Authorization` and every other header unchanged, so
+your client sends its normal API key as if it were talking to the
+upstream directly.
+
+## Claude Code caveat
+
+Claude Code talks Anthropic's native `/v1/messages` API, not OpenAI's
+`/v1/chat/completions`. This proxy only rewrites the OpenAI shape, so
+Claude Code traffic doesn't go through it. Putting an
+Anthropic→OpenAI shim in between is possible but cancels most of the
+savings (Anthropic-side prompt caching becomes invisible to both ends).
+
+Route a different client through the proxy: Cursor, OpenCode, or any
+tool that lets you set a custom OpenAI-compatible base URL.
+
+## Point a client at the proxy
+
+Wherever the client lets you configure the model endpoint, change the
+base URL:
+
+```
+https://api.openai.com/v1   →   http://localhost:8080/v1
+```
+
+Keep the same API key. The proxy passes through any path other than
+`/v1/chat/completions` untouched (`/v1/models`, `/v1/embeddings`,
+etc.), so nothing else in the client should break.
+
+## Sanity checks before plugging in a real client
+
+```bash
+# Liveness
+curl -s http://localhost:8080/healthz                    # → ok
+
+# Round-trip a tiny completion
+curl -s -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+```
+
+The proxy logs one line per request. If you see a "parse error, passing
+through" line, the safety net worked — the upstream still got the
+(original) request and your client got a real response.
+
+## Monitor
+
+### Live log
+
+The proxy prints one line per request to stdout:
+
+```
+session=abc123def model=gpt-4o-mini in=5264->2454 (-53.4%) passes=[prune_tools dedupe_tool_results compact_history shape_cache] pipeline=221µs upstream=348ms
+```
+
+To background and tail:
+
+```bash
+./token-proxy ... > ./proxy.log 2>&1 &
+tail -f ./proxy.log
+```
+
+### Aggregate snapshot
+
+Save this as `summary.sh` alongside `metrics.db`:
+
+```bash
+#!/usr/bin/env bash
+sqlite3 ./metrics.db <<'SQL'
+.mode column
+.headers on
+
+-- Per-session savings (top 15 by activity)
+SELECT
+  substr(session_id,1,12)                                              AS session,
+  COUNT(*)                                                             AS turns,
+  SUM(tokens_in)                                                       AS before,
+  SUM(tokens_in_after)                                                 AS after,
+  ROUND(100.0*(SUM(tokens_in)-SUM(tokens_in_after))/SUM(tokens_in),1)  AS save_pct,
+  ROUND(AVG(pipeline_latency_us)/1000.0,2)                             AS pipe_ms
+FROM requests
+GROUP BY session_id
+ORDER BY turns DESC
+LIMIT 15;
+
+-- Overall
+SELECT
+  COUNT(*)                                                                          AS total_requests,
+  ROUND(100.0*(SUM(tokens_in)-SUM(tokens_in_after))/NULLIF(SUM(tokens_in),0),1)     AS overall_save_pct,
+  (SELECT pipeline_latency_us FROM requests
+    ORDER BY pipeline_latency_us
+    LIMIT 1 OFFSET (SELECT COUNT(*)*95/100 FROM requests))                          AS p95_pipeline_us
+FROM requests;
+SQL
+```
+
+On demand:
+
+```bash
+bash summary.sh
+```
+
+Live refresh every 30s:
+
+```bash
+watch -n 30 bash summary.sh
+```
+
+More queries (pass effectiveness, latency percentiles) live in
+[README.md](README.md#how-to-read-the-metrics).
+
+## Stop
+
+```bash
+pkill -f /token-proxy   # if backgrounded
+```
+
+Or `Ctrl-C` if running in the foreground. Session state lives only in
+memory and is discarded on shutdown; `metrics.db` is preserved.

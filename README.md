@@ -53,6 +53,10 @@ go run . -upstream https://api.openai.com -dry-run
 Point your coding client at `http://localhost:8080/v1` with your normal
 API key (the proxy forwards `Authorization` unchanged).
 
+See [USAGE.md](USAGE.md) for the full operator's guide: client setup,
+monitoring, and the Claude Code caveat (it speaks Anthropic's native
+API, so it doesn't route through this proxy directly).
+
 ## How to read the metrics
 
 Every request appends a row to `metrics.db` (SQLite). Useful queries:

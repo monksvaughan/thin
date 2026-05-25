@@ -96,6 +96,53 @@ func TestPruneTools_skipsWhenCacheHit(t *testing.T) {
 	}
 }
 
+func TestPruneTools_keepsToolNamedByToolChoice(t *testing.T) {
+	sess := session.NewStore().Get("forced-tool")
+	usedCall := Message{
+		Role: "assistant",
+		ToolCalls: []ToolCall{{
+			ID: "call_1", Type: "function",
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "read_file", Arguments: `{"path":"x"}`},
+		}},
+	}
+	for i := 0; i < minObservedTurnsForPrune; i++ {
+		sess.ObserveToolCalls(ToolCallNames([]Message{usedCall}))
+	}
+	forced, err := json.Marshal(map[string]any{
+		"type":     "function",
+		"function": map[string]any{"name": "write_file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &ChatRequest{
+		Messages: []Message{usedCall},
+		Tools: []Tool{
+			{Type: "function", Function: ToolFunction{Name: "read_file"}},
+			{Type: "function", Function: ToolFunction{Name: "write_file"}},
+			{Type: "function", Function: ToolFunction{Name: "delete_repo"}},
+		},
+		Extra: map[string]json.RawMessage{"tool_choice": forced},
+	}
+	sess.ObserveToolCalls(ToolCallNames(req.Messages))
+	if pruned := PruneTools(req, sess); pruned != 1 {
+		t.Fatalf("expected only unforced unused tool pruned, got %d", pruned)
+	}
+	got := map[string]bool{}
+	for _, tool := range req.Tools {
+		got[tool.Function.Name] = true
+	}
+	if !got["write_file"] {
+		t.Fatal("tool named by tool_choice must not be pruned")
+	}
+	if got["delete_repo"] {
+		t.Fatal("unforced unused tool should still be pruned")
+	}
+}
+
 func TestPruneTools_dropsUnusedAfterEnoughTurns(t *testing.T) {
 	sess := session.NewStore().Get("s2")
 
@@ -162,7 +209,7 @@ func TestDedupeToolResults_replacesOlderDuplicate(t *testing.T) {
 			mkResult(t, "c1", "FULL FILE CONTENTS A"),
 			{Role: "assistant", Content: mustContent(t, "ok")},
 			mkCall("c2", "read_file", `{"path":"a.go"}`),
-			mkResult(t, "c2", "FULL FILE CONTENTS A (re-read)"),
+			mkResult(t, "c2", "FULL FILE CONTENTS A"),
 		},
 	}
 	stubbed := DedupeToolResults(req)
@@ -177,8 +224,39 @@ func TestDedupeToolResults_replacesOlderDuplicate(t *testing.T) {
 	}
 	var last string
 	_ = json.Unmarshal(req.Messages[4].Content, &last)
-	if !strings.Contains(last, "FULL FILE CONTENTS A (re-read)") {
+	if !strings.Contains(last, "FULL FILE CONTENTS A") {
 		t.Fatalf("expected last result intact, got: %s", last)
+	}
+}
+
+func TestDedupeToolResults_doesNotDedupeSameCallWhenOutputChanged(t *testing.T) {
+	req := &ChatRequest{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{
+				ID: "c1", Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{Name: "run_tests", Arguments: `{}`},
+			}}},
+			{Role: "tool", ToolCallID: "c1", Content: mustContent(t, "FAIL: old error")},
+			{Role: "assistant", ToolCalls: []ToolCall{{
+				ID: "c2", Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{Name: "run_tests", Arguments: `{}`},
+			}}},
+			{Role: "tool", ToolCallID: "c2", Content: mustContent(t, "FAIL: new error")},
+		},
+	}
+	if stubbed := DedupeToolResults(req); stubbed != 0 {
+		t.Fatalf("expected 0 stubbed when output changed, got %d", stubbed)
+	}
+	var first string
+	_ = json.Unmarshal(req.Messages[1].Content, &first)
+	if first != "FAIL: old error" {
+		t.Fatalf("changed output should remain intact, got %q", first)
 	}
 }
 

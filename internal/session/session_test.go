@@ -17,6 +17,20 @@ func TestIDFor_ExplicitHeaderWins(t *testing.T) {
 // Session affinity is the entire point of the hash — same conversation must
 // resolve to the same ID across turns, or prune_tools never builds enough
 // history to fire and dedupe_tool_results can't find duplicates.
+func TestIDForRequest_MatchesImplicitIDFor(t *testing.T) {
+	r := httptest.NewRequest("POST", "/", nil)
+	req := map[string]any{
+		"model": "gpt-4",
+		"messages": []map[string]any{
+			{"role": "system", "content": "you are helpful"},
+			{"role": "user", "content": "hello"},
+		},
+	}
+	if got, want := IDForRequest(req), IDFor(r, req); got != want {
+		t.Fatalf("IDForRequest must match implicit live ID: got %q want %q", got, want)
+	}
+}
+
 func TestIDFor_SameConversationSameHash(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", nil)
 	req := map[string]any{

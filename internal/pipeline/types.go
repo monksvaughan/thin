@@ -13,10 +13,10 @@ import "encoding/json"
 // ChatRequest models /v1/chat/completions. Extra is a catch-all for fields
 // we don't explicitly model; we serialize them back out unchanged.
 type ChatRequest struct {
-	Model    string          `json:"model"`
-	Messages []Message       `json:"messages"`
-	Tools    []Tool          `json:"tools,omitempty"`
-	Stream   bool            `json:"stream,omitempty"`
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+	Tools    []Tool    `json:"tools,omitempty"`
+	Stream   bool      `json:"stream,omitempty"`
 	// Extra holds passthrough fields. Populated by custom UnmarshalJSON.
 	Extra map[string]json.RawMessage `json:"-"`
 }
@@ -25,19 +25,20 @@ type ChatRequest struct {
 // a list of parts (for multimodal or for Anthropic-style cache_control
 // blocks), so we keep it as RawMessage.
 type Message struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Role       string                     `json:"role"`
+	Content    json.RawMessage            `json:"content,omitempty"`
+	Name       string                     `json:"name,omitempty"`
+	ToolCalls  []ToolCall                 `json:"tool_calls,omitempty"`
+	ToolCallID string                     `json:"tool_call_id,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
 }
 
 // Tool is a function tool definition. Extra preserves any top-level fields
 // we don't model (Anthropic's cache_control, vendor-specific hints) so they
 // survive the round trip to the upstream.
 type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Type     string                     `json:"type"`
+	Function ToolFunction               `json:"function"`
 	Extra    map[string]json.RawMessage `json:"-"`
 }
 
@@ -59,11 +60,20 @@ type ToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 // known fields we model explicitly; everything else flows into Extra.
 var knownTopLevelFields = map[string]bool{
 	"model": true, "messages": true, "tools": true, "stream": true,
+}
+
+var knownMessageFields = map[string]bool{
+	"role": true, "content": true, "name": true, "tool_calls": true, "tool_call_id": true,
+}
+
+var knownToolCallFields = map[string]bool{
+	"id": true, "type": true, "function": true,
 }
 
 var knownToolFields = map[string]bool{
@@ -107,6 +117,84 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	for k, v := range r.Extra {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
+func (m *Message) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	type alias Message
+	var tmp alias
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*m = Message(tmp)
+	m.Extra = nil
+	for k, v := range raw {
+		if !knownMessageFields[k] {
+			if m.Extra == nil {
+				m.Extra = map[string]json.RawMessage{}
+			}
+			m.Extra[k] = v
+		}
+	}
+	return nil
+}
+
+func (m Message) MarshalJSON() ([]byte, error) {
+	out := map[string]json.RawMessage{}
+	type alias Message
+	known, err := json.Marshal(alias(m))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(known, &out); err != nil {
+		return nil, err
+	}
+	for k, v := range m.Extra {
+		out[k] = v
+	}
+	return json.Marshal(out)
+}
+
+func (tc *ToolCall) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	type alias ToolCall
+	var tmp alias
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*tc = ToolCall(tmp)
+	tc.Extra = nil
+	for k, v := range raw {
+		if !knownToolCallFields[k] {
+			if tc.Extra == nil {
+				tc.Extra = map[string]json.RawMessage{}
+			}
+			tc.Extra[k] = v
+		}
+	}
+	return nil
+}
+
+func (tc ToolCall) MarshalJSON() ([]byte, error) {
+	out := map[string]json.RawMessage{}
+	type alias ToolCall
+	known, err := json.Marshal(alias(tc))
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(known, &out); err != nil {
+		return nil, err
+	}
+	for k, v := range tc.Extra {
 		out[k] = v
 	}
 	return json.Marshal(out)

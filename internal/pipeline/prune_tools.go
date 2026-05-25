@@ -1,6 +1,10 @@
 package pipeline
 
-import "github.com/you/token-proxy/internal/session"
+import (
+	"encoding/json"
+
+	"github.com/you/token-proxy/internal/session"
+)
 
 // PruneTools removes function tool definitions for tools the session has
 // never actually called and that don't appear in recent assistant turns.
@@ -37,8 +41,10 @@ func PruneTools(req *ChatRequest, sess *session.Session) int {
 	}
 
 	// Collect tools called in this exact request (belt + braces; the
-	// session bookkeeping already covers history but be defensive).
-	usedInRequest := map[string]bool{}
+	// session bookkeeping already covers history but be defensive). Also keep
+	// any tool explicitly named by tool_choice; pruning it while preserving the
+	// forced tool_choice would make the upstream reject the request.
+	usedInRequest := forcedToolChoice(req)
 	for _, m := range req.Messages {
 		for _, tc := range m.ToolCalls {
 			usedInRequest[tc.Function.Name] = true
@@ -57,4 +63,31 @@ func PruneTools(req *ChatRequest, sess *session.Session) int {
 	}
 	req.Tools = kept
 	return pruned
+}
+
+func forcedToolChoice(req *ChatRequest) map[string]bool {
+	forced := map[string]bool{}
+	if req.Extra == nil {
+		return forced
+	}
+	raw, ok := req.Extra["tool_choice"]
+	if !ok {
+		return forced
+	}
+
+	// String forms ("auto", "none", "required") do not name a specific tool.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return forced
+	}
+
+	var choice struct {
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &choice); err == nil && choice.Function.Name != "" {
+		forced[choice.Function.Name] = true
+	}
+	return forced
 }

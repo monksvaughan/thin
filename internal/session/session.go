@@ -134,6 +134,13 @@ func IDFor(r *http.Request, req any) string {
 	if h := r.Header.Get("X-Session-Id"); h != "" {
 		return h
 	}
+	return IDForRequest(req)
+}
+
+// IDForRequest derives the implicit session ID from request shape. It is
+// exposed so offline tools (replay) use the exact same session-affinity logic
+// as the live proxy.
+func IDForRequest(req any) string {
 	// Hash the first system message + first user message + model.
 	b, err := json.Marshal(req)
 	if err != nil {

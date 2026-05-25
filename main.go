@@ -169,15 +169,14 @@ func handleChatCompletions(
 
 	// Extract the upstream's cache signal from the response tail and record
 	// it on the session so the next turn's prune_tools can decide whether
-	// to fire. If we couldn't find a signal we leave the previous value in
-	// place — fail-open: when we have no signal, the next turn will prune
-	// like today (the default lastCacheHit is false on a fresh session).
+	// to fire. Missing usage is treated as "no observed hit" rather than
+	// carrying a stale previous hit forever.
 	sess := sessions.Get(sessionID)
-	cacheHit := sess.LastCacheHit()
+	cacheHit := false
 	if n, ok := usage.ExtractCacheHit(cap.tail); ok {
 		cacheHit = n > 0
-		sess.RecordCacheHit(cacheHit)
 	}
+	sess.RecordCacheHit(cacheHit)
 
 	// Count tokens off the request path: the client has already received its
 	// response by the time we get here, so this latency doesn't reach them.
@@ -237,6 +236,9 @@ func (c *captureWriter) WriteHeader(code int) {
 }
 
 func (c *captureWriter) Write(b []byte) (int, error) {
+	if c.status == 0 {
+		c.status = http.StatusOK
+	}
 	c.bodyBytes += len(b)
 	// Maintain a sliding tail of the last responseTailBytes bytes. We don't
 	// care about the head — usage blocks live near the end (final SSE chunk

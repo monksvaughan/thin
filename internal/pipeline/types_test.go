@@ -109,6 +109,57 @@ func TestTool_RoundTripPreservesUnknownToolLevelFields(t *testing.T) {
 // TestMessage_RoundTripPreservesPartsContent covers the multimodal/parts
 // case that compact_history is documented to skip. The content here is a
 // JSON array, not a string — we must not corrupt it.
+func TestMessage_RoundTripPreservesUnknownMessageFields(t *testing.T) {
+	in := []byte(`{
+		"model": "gpt-4o-mini",
+		"messages": [{
+			"role":"assistant",
+			"content":"thinking",
+			"cache_control": {"type":"ephemeral"},
+			"recipient": "tool_namespace"
+		}]
+	}`)
+
+	var req ChatRequest
+	if err := json.Unmarshal(in, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	out, err := json.Marshal(&req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !jsonEqual(t, in, out) {
+		t.Fatalf("message-level field dropped\nin:  %s\nout: %s", in, out)
+	}
+}
+
+func TestMessage_RoundTripPreservesUnknownToolCallFields(t *testing.T) {
+	in := []byte(`{
+		"model": "gpt-4o-mini",
+		"messages": [{
+			"role":"assistant",
+			"tool_calls": [{
+				"id":"call_1",
+				"type":"function",
+				"function":{"name":"lookup","arguments":"{}"},
+				"index": 0
+			}]
+		}]
+	}`)
+
+	var req ChatRequest
+	if err := json.Unmarshal(in, &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	out, err := json.Marshal(&req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !jsonEqual(t, in, out) {
+		t.Fatalf("tool-call-level field dropped\nin:  %s\nout: %s", in, out)
+	}
+}
+
 func TestMessage_RoundTripPreservesPartsContent(t *testing.T) {
 	in := []byte(`{
 		"model": "gpt-4o-mini",

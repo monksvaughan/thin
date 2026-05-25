@@ -8,7 +8,8 @@
 // without paying for the real calls.
 //
 // Usage:
-//   cat requests.jsonl | go run ./cmd/replay
+//
+//	cat requests.jsonl | go run ./cmd/replay
 //
 // JSONL format: one request body per line. Capture them with any HTTP
 // recorder (mitmproxy, httpyac, etc.) — the proxy itself only logs metadata.
@@ -143,17 +144,5 @@ func truncate(s string, n int) string {
 }
 
 func synthSessionID(req *pipeline.ChatRequest) string {
-	// Re-use the live proxy's hash via a stub http request. Simpler: hash
-	// model + first system + first user content directly here. We accept a
-	// small duplication of logic to keep replay independent of net/http.
-	for _, m := range req.Messages {
-		if m.Role == "user" {
-			s := req.Model + ":" + string(m.Content)
-			if len(s) > 32 {
-				s = s[:32]
-			}
-			return s
-		}
-	}
-	return req.Model
+	return session.IDForRequest(req)
 }

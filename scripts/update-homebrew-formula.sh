@@ -90,7 +90,7 @@ class Thin < Formula
 end
 EOF_FORMULA
 
-git add -A Formula Casks
+git add -A
 
 if git diff --cached --quiet; then
   echo "Homebrew formula already up to date"

@@ -90,13 +90,15 @@ class Thin < Formula
 end
 EOF_FORMULA
 
-if git diff --quiet -- Formula/thin.rb Casks/thin.rb Casks; then
+git add -A Formula Casks
+
+if git diff --cached --quiet; then
   echo "Homebrew formula already up to date"
   exit 0
 fi
 
+git status --short
 git config user.name "thin release bot"
 git config user.email "release-bot@users.noreply.github.com"
-git add Formula/thin.rb
 git commit -m "Update thin to ${version}"
 git push origin "$branch"

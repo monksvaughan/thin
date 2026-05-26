@@ -25,6 +25,11 @@ git clone "https://x-access-token:${token}@github.com/${repo}.git" "$formula_dir
 cd "$formula_dir"
 git checkout "$branch"
 mkdir -p Formula
+# Older releases used a Homebrew cask. Remove it so `brew install
+# monksvaughan/tap/thin` resolves to the formula and avoids cask quarantine
+# behaviour for this CLI binary.
+rm -f Casks/thin.rb
+rmdir Casks 2>/dev/null || true
 
 checksum() {
   local archive="$1"
@@ -85,7 +90,7 @@ class Thin < Formula
 end
 EOF_FORMULA
 
-if git diff --quiet -- Formula/thin.rb; then
+if git diff --quiet -- Formula/thin.rb Casks/thin.rb Casks; then
   echo "Homebrew formula already up to date"
   exit 0
 fi

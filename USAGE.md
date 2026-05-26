@@ -3,6 +3,22 @@
 Operator's guide for the proxy. For project context and the savings/latency
 targets, see [README.md](README.md).
 
+## License status
+
+Without a commercial license, Thin remains fully functional and prints a short
+free-license notice at startup. Commercial licenses are available for production
+use, support, redistribution, embedding, or uses outside the Functional Source
+License.
+
+```bash
+thin license status
+thin license activate LICENSE_KEY
+thin license remove
+```
+
+You can also provide a license key with the `THIN_LICENSE_KEY` environment
+variable. License checks are not performed in the request path.
+
 ## Build
 
 ```bash

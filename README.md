@@ -107,10 +107,52 @@ Print build information:
 
 Release builds can populate version information with Go linker flags.
 
+## Licensing and commercial use
+
+Thin is source-available under the Functional Source License.
+
+It is free for personal, evaluation, and non-commercial use. Commercial licenses
+are available for production use, support, redistribution, embedding, or uses
+outside the Functional Source License.
+
+Thin does not perform license checks in the request path and does not collect
+usage telemetry.
+
+Manage a local commercial license code with:
+
+```bash
+thin license status
+thin license activate LICENSE_KEY
+thin license remove
+```
+
+A license key may also be supplied with the `THIN_LICENSE_KEY` environment
+variable. Without a commercial license, Thin remains fully functional and prints
+a short free-license notice at startup.
+
+## Install
+
+Build from source:
+
+```bash
+go build -o ./thin ./cmd/thin
+```
+
+Homebrew installation will be available from the project tap after the first
+published release:
+
+```bash
+brew tap monksvaughan/tap
+brew install thin
+```
+
 ## Operator guide
 
 See [USAGE.md](USAGE.md) for setup examples, Anthropic/Claude Code notes,
 monitoring, validation, and operational commands.
+
+See [docs/releasing.md](docs/releasing.md) for versioning, release builds, and
+Homebrew publishing.
 
 ## Metrics
 
@@ -164,8 +206,6 @@ cmd/gentestdata/          Synthetic traffic generator
 ## License
 
 Thin is licensed under the Functional Source License 1.1, ALv2 future license.
-Permitted uses include internal business use and non-production use. Commercial
-competing use requires a separate license. Each release converts to Apache 2.0
-two years after publication.
+Each release converts to Apache 2.0 two years after publication.
 
 See [LICENSE](LICENSE) and [LICENSE-NOTES.md](LICENSE-NOTES.md).

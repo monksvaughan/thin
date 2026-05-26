@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/monksvaughan/thin/internal/anthropic"
+	"github.com/monksvaughan/thin/internal/license"
 	"github.com/monksvaughan/thin/internal/metrics"
 	"github.com/monksvaughan/thin/internal/pipeline"
 	"github.com/monksvaughan/thin/internal/session"
@@ -49,9 +50,15 @@ var (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Printf("thin %s\ncommit: %s\ndate: %s\n", version, commit, date)
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version":
+			fmt.Printf("thin %s\ncommit: %s\ndate: %s\n", version, commit, date)
+			return
+		case "license":
+			licenseCommand(os.Args[2:])
+			return
+		}
 	}
 
 	var (
@@ -68,6 +75,7 @@ func main() {
 	flag.Parse()
 
 	logger := log.New(os.Stdout, "[proxy] ", log.LstdFlags|log.Lmicroseconds)
+	logLicenseNotice(logger)
 
 	upstreamURL, err := url.Parse(*upstream)
 	if err != nil {
@@ -122,6 +130,79 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Fatalf("server: %v", err)
 	}
+}
+
+func licenseCommand(args []string) {
+	if len(args) == 0 {
+		printLicenseUsage()
+		os.Exit(2)
+	}
+
+	switch args[0] {
+	case "status":
+		printLicenseStatus(license.Current())
+	case "activate":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: thin license activate LICENSE_KEY")
+			os.Exit(2)
+		}
+		st, err := license.Activate(args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "activate license: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("commercial license activated")
+		printLicenseStatus(st)
+	case "remove":
+		path, err := license.Remove()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "remove license: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("removed local license file: %s\n", path)
+	default:
+		printLicenseUsage()
+		os.Exit(2)
+	}
+}
+
+func printLicenseUsage() {
+	fmt.Fprintln(os.Stderr, "usage: thin license <status|activate|remove>")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "commands:")
+	fmt.Fprintln(os.Stderr, "  thin license status")
+	fmt.Fprintln(os.Stderr, "  thin license activate LICENSE_KEY")
+	fmt.Fprintln(os.Stderr, "  thin license remove")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "A license key may also be supplied with %s.\n", license.EnvKey)
+}
+
+func printLicenseStatus(st license.Status) {
+	if st.Licensed {
+		fmt.Printf("license: commercial\nsource: %s\nkey: %s\n", st.Source, st.KeyDisplay)
+		if !st.ActivatedAt.IsZero() {
+			fmt.Printf("activated_at: %s\n", st.ActivatedAt.Format(time.RFC3339))
+		}
+		if st.Path != "" {
+			fmt.Printf("path: %s\n", st.Path)
+		}
+		return
+	}
+
+	fmt.Println("license: free")
+	fmt.Println("Commercial licenses are available for production use, support, redistribution, embedding, or uses outside the Functional Source License.")
+	if st.Path != "" {
+		fmt.Printf("path: %s\n", st.Path)
+	}
+}
+
+func logLicenseNotice(logger *log.Logger) {
+	st := license.Current()
+	if st.Licensed {
+		logger.Printf("commercial license active, source=%s, key=%s", st.Source, st.KeyDisplay)
+		return
+	}
+	logger.Printf("free license active; commercial licenses are available for production use, support, redistribution, embedding, or uses outside the Functional Source License")
 }
 
 func newReverseProxy(upstreamURL *url.URL) *httputil.ReverseProxy {

@@ -33,37 +33,49 @@ other context-heavy payloads.
 - **Streaming friendly** — server-sent-event responses are proxied without
   buffering the interactive stream.
 
-## Observed performance
+## Install
 
-Recent local development logs show the kind of performance Thin is designed
-for. This is not a formal benchmark, but it reflects real proxy runs from this
-repository's metrics database.
+Install with Homebrew:
 
-Sample: **130 requests** across **11 sessions**, covering approximately **10.0M
-input tokens** before processing.
+```bash
+brew install monksvaughan/tap/thin
+```
 
-| Slice | Requests | Input-token reduction | Pipeline latency |
-| --- | ---: | ---: | ---: |
-| Overall sample | 130 | 36.6% weighted reduction | p50 3.1ms, p95 41.9ms |
-| OpenAI-compatible traffic | 114 | 38.0% weighted reduction | p50 3.0ms, p95 9.2ms |
-| Anthropic-native traffic | 16 | 31.9% weighted reduction | p50 41.6ms, p95 45.9ms |
-| Sessions with 5+ turns | 5 sessions | 32.7% median reduction | — |
+Or tap first, then install:
 
-Pipeline latency measures Thin's local request processing only. It excludes
-network time, upstream model latency, and response streaming time.
+```bash
+brew tap monksvaughan/tap
+brew install thin
+```
 
-## Quick start
+End users should not need GitHub credentials for Homebrew installation. If
+`brew tap monksvaughan/tap` prompts for a GitHub username, the tap repository is
+not public or is not accessible over HTTPS.
+
+Build from source:
+
+```bash
+go build -o ./thin ./cmd/thin
+```
+
+Print build information:
+
+```bash
+thin version
+```
+
+## Run
 
 Run against OpenAI-compatible traffic:
 
 ```bash
-go run ./cmd/thin -upstream https://api.openai.com -listen :8080
+thin -upstream https://api.openai.com -listen :8080
 ```
 
 Run with default upstreams:
 
 ```bash
-go run ./cmd/thin -listen :8080
+thin -listen :8080
 ```
 
 By default:
@@ -80,32 +92,37 @@ http://localhost:8080/v1
 Use your normal API key. Thin forwards authorization headers to the upstream
 provider.
 
-## Dry-run mode
+### Dry-run mode
 
 Dry-run mode forwards the original request upstream but records what Thin would
 have sent after processing. This is useful for validating savings and latency
 before enabling active rewriting.
 
 ```bash
-go run ./cmd/thin \
+thin \
   -upstream https://api.openai.com \
   -listen :8080 \
   -dry-run
 ```
 
-## Build
+## Observed performance
 
-```bash
-go build -o ./thin ./cmd/thin
-```
+Recent local development logs show the kind of performance Thin is designed
+for. This is not a formal benchmark, but it reflects real proxy runs from this
+repository's metrics database. Results vary by workload and client behavior.
 
-Print build information:
+Sample: **207 requests** across **11 sessions**, covering approximately **16.7M
+input tokens** before processing.
 
-```bash
-./thin version
-```
+| Slice | Requests | Input-token reduction | Pipeline latency |
+| --- | ---: | ---: | ---: |
+| Overall sample | 207 | 38.8% weighted reduction | p50 4.4ms, p95 37.6ms |
+| OpenAI-compatible traffic | 191 | 39.9% weighted reduction | p50 4.3ms, p95 9.1ms |
+| Anthropic-native traffic | 16 | 31.9% weighted reduction | p50 41.6ms, p95 45.9ms |
+| Sessions with 5+ turns | 5 sessions | 32.7% median reduction | — |
 
-Release builds can populate version information with Go linker flags.
+Pipeline latency measures Thin's local request processing only. It excludes
+network time, upstream model latency, and response streaming time.
 
 ## Licensing and commercial use
 
@@ -129,31 +146,6 @@ thin license remove
 A license key may also be supplied with the `THIN_LICENSE_KEY` environment
 variable. Without a commercial license, Thin remains fully functional and prints
 a short free-license notice at startup.
-
-## Install
-
-Build from source:
-
-```bash
-go build -o ./thin ./cmd/thin
-```
-
-Install with Homebrew after the first published release:
-
-```bash
-brew install monksvaughan/tap/thin
-```
-
-Or tap first, then install:
-
-```bash
-brew tap monksvaughan/tap
-brew install thin
-```
-
-End users should not need GitHub credentials for Homebrew installation. If
-`brew tap monksvaughan/tap` prompts for a GitHub username, the tap repository is
-not public or is not accessible over HTTPS.
 
 ## Operator guide
 

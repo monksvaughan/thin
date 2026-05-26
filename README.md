@@ -147,6 +147,24 @@ A license key may also be supplied with the `THIN_LICENSE_KEY` environment
 variable. Without a commercial license, Thin remains fully functional and prints
 a short free-license notice at startup.
 
+## Coding-agent setup
+
+Thin works with clients that support custom OpenAI-compatible or
+Anthropic-native base URLs.
+
+| Client | Thin base URL |
+| --- | --- |
+| Pi via OpenAI-compatible provider | `http://localhost:8080/v1` |
+| Pi via Anthropic Messages provider | `http://localhost:8080` |
+| Claude Code | `http://localhost:8080` |
+| OpenAI Codex CLI / OpenAI-compatible tools | `http://localhost:8080/v1` |
+| Cursor / other OpenAI-compatible clients | `http://localhost:8080/v1` |
+
+Keep using your normal provider API key. Thin forwards authorization headers to
+the configured upstream.
+
+See [USAGE.md](USAGE.md#configure-coding-agents) for client-specific examples.
+
 ## Operator guide
 
 See [USAGE.md](USAGE.md) for setup examples, Anthropic/Claude Code notes,

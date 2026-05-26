@@ -61,36 +61,124 @@ The proxy forwards `Authorization` and every other header unchanged, so
 your client sends its normal API key as if it were talking to the
 upstream directly.
 
-## Claude Code / Anthropic native mode
+## Configure coding agents
 
-The proxy also rewrites Anthropic's native `/v1/messages` API, so Claude Code
-can use it directly if your Claude Code version lets you set the Anthropic base
-URL. Run against Anthropic:
+Thin works with clients that let you point OpenAI-compatible or Anthropic-native
+traffic at a custom base URL.
+
+Use the same provider API key you would normally use. Thin forwards
+`Authorization` and other headers unchanged.
+
+### Base URLs
+
+| API shape | Upstream endpoint | Thin base URL |
+| --- | --- | --- |
+| OpenAI-compatible Chat Completions | `https://api.openai.com/v1` | `http://localhost:8080/v1` |
+| Anthropic Messages API | `https://api.anthropic.com` | `http://localhost:8080` |
+
+Thin rewrites `/v1/chat/completions` and `/v1/messages`. Other paths such as
+`/v1/models` and `/v1/embeddings` pass through untouched.
+
+### Pi
+
+Pi supports custom providers in `~/.pi/agent/models.json`.
+
+OpenAI-compatible example:
+
+```json
+{
+  "providers": {
+    "thin-openai": {
+      "baseUrl": "http://localhost:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "OPENAI_API_KEY",
+      "models": [
+        { "id": "gpt-4o" },
+        { "id": "gpt-4o-mini" }
+      ]
+    }
+  }
+}
+```
+
+Anthropic-native example:
+
+```json
+{
+  "providers": {
+    "thin-anthropic": {
+      "baseUrl": "http://localhost:8080",
+      "api": "anthropic-messages",
+      "apiKey": "ANTHROPIC_API_KEY",
+      "models": [
+        { "id": "claude-sonnet-4-5" },
+        { "id": "claude-opus-4-1" }
+      ]
+    }
+  }
+}
+```
+
+Then select the `thin-*` provider/model from Pi's model picker.
+
+### Claude Code
+
+Claude Code uses Anthropic's native Messages API, so run Thin with the
+Anthropic upstream enabled:
 
 ```bash
-./thin \
+thin \
   -listen :8080 \
   -anthropic-upstream https://api.anthropic.com \
   -db ./metrics.db \
-  -prune-log ./prune.log
+  -dry-run
 ```
 
-Then configure Claude Code's Anthropic base URL to `http://localhost:8080` and
-use your normal Anthropic API key. The exact environment variable/setting is
-client-version dependent.
+Then configure Claude Code to use:
 
-## Point a client at the proxy
-
-Wherever the client lets you configure the model endpoint, change the
-base URL:
-
-```
-https://api.openai.com/v1   →   http://localhost:8080/v1
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_API_KEY=sk-ant-...
+claude
 ```
 
-Keep the same API key. The proxy rewrites `/v1/chat/completions` and
-`/v1/messages`; other paths (`/v1/models`, `/v1/embeddings`, etc.) pass
-through untouched, so nothing else in the client should break.
+Claude Code settings vary by version. If your version has a config file or UI
+setting for the Anthropic base URL, use `http://localhost:8080` there instead.
+Do not add `/v1` for Anthropic-native traffic.
+
+### OpenAI Codex CLI
+
+For Codex CLI or other OpenAI-compatible command-line agents, point the OpenAI
+base URL at Thin:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=http://localhost:8080/v1
+codex
+```
+
+Some OpenAI-compatible tools use `OPENAI_API_BASE` or a config-file field such
+as `base_url` instead of `OPENAI_BASE_URL`. The value should be
+`http://localhost:8080/v1`.
+
+### Cursor and other OpenAI-compatible clients
+
+For clients with an OpenAI-compatible endpoint setting, set:
+
+```text
+Base URL: http://localhost:8080/v1
+API key:  your normal provider API key
+```
+
+For Anthropic-native clients, set:
+
+```text
+Base URL: http://localhost:8080
+API key:  your normal Anthropic API key
+```
+
+If a client does not support custom base URLs, put Thin behind whatever shim or
+provider gateway that client already supports.
 
 ## Sanity checks before plugging in a real client
 

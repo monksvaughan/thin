@@ -1,4 +1,4 @@
-module github.com/you/token-proxy
+module github.com/monksvaughan/thin
 
 go 1.22
 

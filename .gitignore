@@ -1,7 +1,11 @@
 # Binaries
+/thin
 /token-proxy
 /replay
 /gentestdata
+
+# Release artifacts
+/dist/
 
 # SQLite metrics (default path) + WAL/SHM sidecars
 *.db
@@ -14,6 +18,13 @@
 
 # Claude Code local settings
 /.claude/settings.local.json
+
+# Local environment / signing material
+*.env
+.env
+.env.*
+cosign.key
+licenses-*.json
 
 # OS
 .DS_Store

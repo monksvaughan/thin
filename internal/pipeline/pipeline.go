@@ -1,7 +1,7 @@
 package pipeline
 
 import (
-	"github.com/you/token-proxy/internal/session"
+	"github.com/monksvaughan/thin/internal/session"
 )
 
 // Pipeline applies the optimization passes in order. It is intentionally

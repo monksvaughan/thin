@@ -3,7 +3,7 @@ package pipeline
 import (
 	"encoding/json"
 
-	"github.com/you/token-proxy/internal/session"
+	"github.com/monksvaughan/thin/internal/session"
 )
 
 // PruneTools removes function tool definitions for tools the session has

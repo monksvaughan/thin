@@ -7,10 +7,10 @@
 // the cached prefix and re-pay full price, so we skip the prune.
 //
 // We scan rather than JSON-parse for two reasons:
-//   1. For streaming SSE bodies, we may only have a tail of the stream — not
-//      a complete JSON document.
-//   2. We don't care about anything else in the body, so paying to parse the
-//      whole thing would be wasteful.
+//  1. For streaming SSE bodies, we may only have a tail of the stream — not
+//     a complete JSON document.
+//  2. We don't care about anything else in the body, so paying to parse the
+//     whole thing would be wasteful.
 //
 // We look for two keys, in order:
 //   - OpenAI: usage.prompt_tokens_details.cached_tokens

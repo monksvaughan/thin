@@ -8,8 +8,9 @@
 // pass effectiveness BEFORE we have real recorded traffic.
 //
 // Usage:
-//   go run ./cmd/gentestdata > test.jsonl
-//   cat test.jsonl | go run ./cmd/replay
+//
+//	go run ./cmd/gentestdata > test.jsonl
+//	cat test.jsonl | go run ./cmd/replay
 package main
 
 import (

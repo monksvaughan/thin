@@ -1,6 +1,6 @@
 package pipeline
 
-import "github.com/you/token-proxy/internal/session"
+import "github.com/monksvaughan/thin/internal/session"
 
 // ShapeForCache is a measurement-and-annotation pass.
 //

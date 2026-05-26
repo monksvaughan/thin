@@ -1,6 +1,6 @@
 package anthropic
 
-import "github.com/you/token-proxy/internal/session"
+import "github.com/monksvaughan/thin/internal/session"
 
 func ShapeForCache(req *MessagesRequest, sess *session.Session) bool {
 	prev := sess.LastMessageFingerprints()

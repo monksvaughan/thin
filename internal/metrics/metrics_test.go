@@ -47,9 +47,9 @@ func TestStore_OpenInsertRoundTrip(t *testing.T) {
 	defer db.Close()
 
 	var (
-		sid, model, passes                                       string
-		tsNs, pipelineUs, upstreamUs                             int64
-		tIn, tInAfter, tOut, bIn, bOut, status, cacheHit         int
+		sid, model, passes                               string
+		tsNs, pipelineUs, upstreamUs                     int64
+		tIn, tInAfter, tOut, bIn, bOut, status, cacheHit int
 	)
 	row := db.QueryRow(`SELECT session_id, ts, model,
 		tokens_in, tokens_in_after, tokens_out_est,

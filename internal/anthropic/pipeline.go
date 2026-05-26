@@ -1,6 +1,6 @@
 package anthropic
 
-import "github.com/you/token-proxy/internal/session"
+import "github.com/monksvaughan/thin/internal/session"
 
 type Pipeline struct {
 	sessions         *session.Store

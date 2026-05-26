@@ -1,4 +1,4 @@
-# token-proxy (weekend prototype)
+# thin (weekend prototype)
 
 An OpenAI-compatible and Anthropic Messages API HTTP proxy that tries to cut
 the input-token bill of agentic coding clients (Claude Code, Cursor, OpenCode,
@@ -39,16 +39,16 @@ Anything we can't parse confidently we pass through untouched.
 
 ```bash
 # Against OpenAI
-go run . -upstream https://api.openai.com -listen :8080
+go run ./cmd/thin -upstream https://api.openai.com -listen :8080
 
 # Anthropic native /v1/messages defaults to https://api.anthropic.com
 # while OpenAI-compatible /v1/chat/completions defaults to https://api.openai.com.
-go run . -listen :8080
+go run ./cmd/thin -listen :8080
 
 # Measurement-only mode: emit the original request upstream, but log
 # what we WOULD have saved. Use this for the first few sessions to build
 # confidence before flipping to active mode.
-go run . -upstream https://api.openai.com -dry-run
+go run ./cmd/thin -upstream https://api.openai.com -dry-run
 ```
 
 Point your coding client at `http://localhost:8080/v1` with your normal
@@ -108,7 +108,7 @@ After running for a few days against your own Claude Code or Cursor usage:
 ## Project layout
 
 ```
-main.go                          HTTP server, request lifecycle
+cmd/thin/main.go                 HTTP server, request lifecycle / binary entrypoint
 internal/pipeline/
   types.go                       Chat request schema (OpenAI-compat)
   pipeline.go                    Pass orchestrator + Result type
@@ -124,6 +124,15 @@ internal/tokens/
 internal/metrics/
   metrics.go                     SQLite persistence
 ```
+
+## License
+
+Thin is licensed under the Functional Source License 1.1, ALv2 future license.
+Permitted uses include internal business use and non-production use. Commercial
+competing use requires a separate license. Each release converts to Apache 2.0
+two years after publication.
+
+See [LICENSE](LICENSE) and [LICENSE-NOTES.md](LICENSE-NOTES.md).
 
 ## Known weaknesses (call them out before HN does)
 

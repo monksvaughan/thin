@@ -3,7 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 
-	"github.com/you/token-proxy/internal/session"
+	"github.com/monksvaughan/thin/internal/session"
 )
 
 const minObservedTurnsForPrune = 3

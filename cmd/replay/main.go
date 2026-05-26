@@ -22,9 +22,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/you/token-proxy/internal/pipeline"
-	"github.com/you/token-proxy/internal/session"
-	"github.com/you/token-proxy/internal/tokens"
+	"github.com/monksvaughan/thin/internal/pipeline"
+	"github.com/monksvaughan/thin/internal/session"
+	"github.com/monksvaughan/thin/internal/tokens"
 )
 
 type sessionAgg struct {

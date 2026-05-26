@@ -6,7 +6,7 @@ targets, see [README.md](README.md).
 ## Build
 
 ```bash
-go build -o ./token-proxy .
+go build -o ./thin ./cmd/thin
 ```
 
 Single static binary, ~15 MB. No CGo (SQLite is `modernc.org/sqlite`).
@@ -18,7 +18,7 @@ Start in dry-run for the first few sessions. Dry-run forwards the
 no risk to the conversation, real numbers in `metrics.db`.
 
 ```bash
-./token-proxy \
+./thin \
   -listen :8080 \
   -upstream https://api.openai.com \
   -db ./metrics.db \
@@ -52,7 +52,7 @@ can use it directly if your Claude Code version lets you set the Anthropic base
 URL. Run against Anthropic:
 
 ```bash
-./token-proxy \
+./thin \
   -listen :8080 \
   -anthropic-upstream https://api.anthropic.com \
   -db ./metrics.db \
@@ -106,7 +106,7 @@ session=abc123def model=gpt-4o-mini in=5264->2454 (-53.4%) passes=[prune_tools d
 To background and tail:
 
 ```bash
-./token-proxy ... > ./proxy.log 2>&1 &
+./thin ... > ./proxy.log 2>&1 &
 tail -f ./proxy.log
 ```
 
@@ -170,7 +170,7 @@ More queries (pass effectiveness, latency percentiles) live in
 ## Stop
 
 ```bash
-pkill -f /token-proxy   # if backgrounded
+pkill -f /thin   # if backgrounded
 ```
 
 Or `Ctrl-C` if running in the foreground. Session state lives only in

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/you/token-proxy/internal/session"
+	"github.com/monksvaughan/thin/internal/session"
 )
 
 func mustContent(t *testing.T, s string) json.RawMessage {

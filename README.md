@@ -1,8 +1,8 @@
 # token-proxy (weekend prototype)
 
-An OpenAI-compatible HTTP proxy that tries to cut the input-token bill of
-agentic coding clients (Claude Code, Cursor, OpenCode, etc.) **without
-calling any model itself**. Pure string and JSON manipulation.
+An OpenAI-compatible and Anthropic Messages API HTTP proxy that tries to cut
+the input-token bill of agentic coding clients (Claude Code, Cursor, OpenCode,
+etc.) **without calling any model itself**. Pure string and JSON manipulation.
 
 The goal of this prototype is **not** to be production-ready. It's to
 answer one question honestly:
@@ -15,7 +15,7 @@ have saved ourselves a lot of LLMLingua-shaped pain.
 
 ## What it does
 
-Four passes, applied in order to every `/v1/chat/completions` request:
+Four passes, applied in order to every supported request (`/v1/chat/completions` for OpenAI-compatible clients and `/v1/messages` for Anthropic-native clients):
 
 | Pass | What it does | Risk |
 | --- | --- | --- |
@@ -41,8 +41,9 @@ Anything we can't parse confidently we pass through untouched.
 # Against OpenAI
 go run . -upstream https://api.openai.com -listen :8080
 
-# Against an Anthropic OpenAI-compat shim
-go run . -upstream https://your-anthropic-shim.example.com -listen :8080
+# Anthropic native /v1/messages defaults to https://api.anthropic.com
+# while OpenAI-compatible /v1/chat/completions defaults to https://api.openai.com.
+go run . -listen :8080
 
 # Measurement-only mode: emit the original request upstream, but log
 # what we WOULD have saved. Use this for the first few sessions to build
@@ -53,9 +54,8 @@ go run . -upstream https://api.openai.com -dry-run
 Point your coding client at `http://localhost:8080/v1` with your normal
 API key (the proxy forwards `Authorization` unchanged).
 
-See [USAGE.md](USAGE.md) for the full operator's guide: client setup,
-monitoring, and the Claude Code caveat (it speaks Anthropic's native
-API, so it doesn't route through this proxy directly).
+See [USAGE.md](USAGE.md) for the full operator's guide: OpenAI-compatible
+client setup, Anthropic/Claude Code setup, monitoring, and validation.
 
 ## How to read the metrics
 

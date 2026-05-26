@@ -17,3 +17,6 @@
 
 # OS
 .DS_Store
+/prune.log
+/rewrite.json
+/rewrite.log

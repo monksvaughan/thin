@@ -24,8 +24,21 @@ import (
 // We process from newest to oldest so the latest occurrence is the one
 // that gets kept in full.
 //
+// DedupedToolResult records one older tool result stubbed by DedupeToolResults.
+type DedupedToolResult struct {
+	MessageIndex int    `json:"message_index"`
+	ToolCallID   string `json:"tool_call_id"`
+	BeforeBytes  int    `json:"before_bytes"`
+	AfterBytes   int    `json:"after_bytes"`
+	Reason       string `json:"reason"`
+}
+
 // Returns the number of messages stubbed.
 func DedupeToolResults(req *ChatRequest) int {
+	return len(DedupeToolResultsWithReport(req))
+}
+
+func DedupeToolResultsWithReport(req *ChatRequest) []DedupedToolResult {
 	// Index tool_call_id -> hash via the assistant messages.
 	hashByCallID := map[string]string{}
 	for _, m := range req.Messages {
@@ -42,7 +55,7 @@ func DedupeToolResults(req *ChatRequest) int {
 	// repeated calls such as run_tests{} or read_file(path) can legitimately
 	// change over time, and removing that delta would corrupt the history.
 	seenContentByCall := map[string]map[string]bool{}
-	stubbed := 0
+	var stubbed []DedupedToolResult
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		m := &req.Messages[i]
 		if m.Role != "tool" || m.ToolCallID == "" {
@@ -66,8 +79,15 @@ func DedupeToolResults(req *ChatRequest) int {
 		stub, _ := json.Marshal(fmt.Sprintf(
 			"[deduplicated by proxy: identical tool call output appears later in this conversation]",
 		))
+		beforeBytes := len(m.Content)
 		m.Content = stub
-		stubbed++
+		stubbed = append(stubbed, DedupedToolResult{
+			MessageIndex: i,
+			ToolCallID:   m.ToolCallID,
+			BeforeBytes:  beforeBytes,
+			AfterBytes:   len(stub),
+			Reason:       "identical_tool_call_and_output_appears_later",
+		})
 	}
 	return stubbed
 }

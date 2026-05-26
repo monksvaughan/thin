@@ -25,19 +25,30 @@ import (
 // very first action is to call a tool we dropped.
 const minObservedTurnsForPrune = 3
 
+// PrunedTool records one tool removed from the request and why. It is kept
+// intentionally small so callers can log it without serializing schemas.
+type PrunedTool struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
 func PruneTools(req *ChatRequest, sess *session.Session) int {
+	return len(PruneToolsWithReport(req, sess, nil))
+}
+
+func PruneToolsWithReport(req *ChatRequest, sess *session.Session, protectedTools map[string]bool) []PrunedTool {
 	if len(req.Tools) == 0 {
-		return 0
+		return nil
 	}
 	if sess.Turns() < minObservedTurnsForPrune {
-		return 0
+		return nil
 	}
 	// Adaptive: if the previous response showed a prompt-cache hit, dropping
 	// tools now would change the cached prefix and bust the cache, re-paying
 	// full price for the new shape. The cache is already doing the work we'd
 	// otherwise do here; don't undermine it.
 	if sess.LastCacheHit() {
-		return 0
+		return nil
 	}
 
 	// Collect tools called in this exact request (belt + braces; the
@@ -52,14 +63,17 @@ func PruneTools(req *ChatRequest, sess *session.Session) int {
 	}
 
 	kept := req.Tools[:0]
-	pruned := 0
+	var pruned []PrunedTool
 	for _, t := range req.Tools {
 		name := t.Function.Name
-		if usedInRequest[name] || sess.HasUsedTool(name) {
+		if protectedTools[name] || usedInRequest[name] || sess.HasUsedTool(name) {
 			kept = append(kept, t)
 			continue
 		}
-		pruned++
+		pruned = append(pruned, PrunedTool{
+			Name:   name,
+			Reason: "unused_after_min_observed_turns_and_no_cache_hit",
+		})
 	}
 	req.Tools = kept
 	return pruned

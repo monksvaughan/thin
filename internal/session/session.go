@@ -20,7 +20,8 @@ import (
 // re-derive it from the marshaled request to avoid an import cycle with
 // the pipeline package.
 type chatLike struct {
-	Model    string `json:"model"`
+	Model    string          `json:"model"`
+	System   json.RawMessage `json:"system"`
 	Messages []struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
@@ -154,6 +155,12 @@ func IDForRequest(req any) string {
 	h := sha256.New()
 	h.Write([]byte(chat.Model))
 	h.Write([]byte{0})
+	if len(chat.System) > 0 {
+		h.Write([]byte("system"))
+		h.Write([]byte{0})
+		h.Write([]byte(chat.System))
+		h.Write([]byte{0})
+	}
 	for _, m := range chat.Messages {
 		if m.Role == "system" || m.Role == "user" {
 			h.Write([]byte(m.Role))

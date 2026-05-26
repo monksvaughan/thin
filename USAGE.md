@@ -27,12 +27,17 @@ no risk to the conversation, real numbers in `metrics.db`.
 
 When you trust the numbers, drop `-dry-run`.
 
+By default, `/v1/chat/completions` routes to `https://api.openai.com` and
+`/v1/messages` routes to `https://api.anthropic.com`. Override with `-upstream`
+and `-anthropic-upstream` as needed.
+
 Common upstreams:
 
 | Upstream                | URL                                                          |
 | ----------------------- | ------------------------------------------------------------ |
 | OpenAI                  | `https://api.openai.com`                                     |
 | Gemini (OpenAI-compat)  | `https://generativelanguage.googleapis.com/v1beta/openai`    |
+| Anthropic native        | `https://api.anthropic.com`                                  |
 | Anthropic via shim      | `http://<your-litellm-or-similar>:<port>`                    |
 | Local llama.cpp / Ollama | `http://localhost:<port>`                                   |
 
@@ -40,16 +45,23 @@ The proxy forwards `Authorization` and every other header unchanged, so
 your client sends its normal API key as if it were talking to the
 upstream directly.
 
-## Claude Code caveat
+## Claude Code / Anthropic native mode
 
-Claude Code talks Anthropic's native `/v1/messages` API, not OpenAI's
-`/v1/chat/completions`. This proxy only rewrites the OpenAI shape, so
-Claude Code traffic doesn't go through it. Putting an
-Anthropic→OpenAI shim in between is possible but cancels most of the
-savings (Anthropic-side prompt caching becomes invisible to both ends).
+The proxy also rewrites Anthropic's native `/v1/messages` API, so Claude Code
+can use it directly if your Claude Code version lets you set the Anthropic base
+URL. Run against Anthropic:
 
-Route a different client through the proxy: Cursor, OpenCode, or any
-tool that lets you set a custom OpenAI-compatible base URL.
+```bash
+./token-proxy \
+  -listen :8080 \
+  -anthropic-upstream https://api.anthropic.com \
+  -db ./metrics.db \
+  -prune-log ./prune.log
+```
+
+Then configure Claude Code's Anthropic base URL to `http://localhost:8080` and
+use your normal Anthropic API key. The exact environment variable/setting is
+client-version dependent.
 
 ## Point a client at the proxy
 
@@ -60,9 +72,9 @@ base URL:
 https://api.openai.com/v1   →   http://localhost:8080/v1
 ```
 
-Keep the same API key. The proxy passes through any path other than
-`/v1/chat/completions` untouched (`/v1/models`, `/v1/embeddings`,
-etc.), so nothing else in the client should break.
+Keep the same API key. The proxy rewrites `/v1/chat/completions` and
+`/v1/messages`; other paths (`/v1/models`, `/v1/embeddings`, etc.) pass
+through untouched, so nothing else in the client should break.
 
 ## Sanity checks before plugging in a real client
 

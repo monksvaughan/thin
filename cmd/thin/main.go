@@ -114,7 +114,11 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	logger.Printf("listening on %s, upstream=%s, anthropic_upstream=%s, dry_run=%v, prune_tools=%v, protected_tools=%v", *listen, *upstream, anthropicUpstreamValue, *dryRun, *enablePruneTools, protectedTools)
+	if *enablePruneTools {
+		logger.Printf("listening on %s, upstream=%s, anthropic_upstream=%s, dry_run=%v, prune_tools=%v, protected_tools=%v", *listen, *upstream, anthropicUpstreamValue, *dryRun, *enablePruneTools, protectedTools)
+	} else {
+		logger.Printf("listening on %s, upstream=%s, anthropic_upstream=%s, dry_run=%v, prune_tools=%v", *listen, *upstream, anthropicUpstreamValue, *dryRun, *enablePruneTools)
+	}
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Fatalf("server: %v", err)
 	}

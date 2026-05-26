@@ -138,13 +138,22 @@ Build from source:
 go build -o ./thin ./cmd/thin
 ```
 
-Homebrew installation will be available from the project tap after the first
-published release:
+Install with Homebrew after the first published release:
+
+```bash
+brew install monksvaughan/tap/thin
+```
+
+Or tap first, then install:
 
 ```bash
 brew tap monksvaughan/tap
 brew install thin
 ```
+
+End users should not need GitHub credentials for Homebrew installation. If
+`brew tap monksvaughan/tap` prompts for a GitHub username, the tap repository is
+not public or is not accessible over HTTPS.
 
 ## Operator guide
 

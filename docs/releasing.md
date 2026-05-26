@@ -36,10 +36,10 @@ artifacts using the built-in `GITHUB_TOKEN`.
 
 ### Homebrew tap
 
-GoReleaser updates:
+The release workflow updates:
 
 ```text
-github.com/monksvaughan/homebrew-tap/Casks/thin.rb
+github.com/monksvaughan/homebrew-tap/Formula/thin.rb
 ```
 
 Create a GitHub fine-grained personal access token that can write to the
@@ -87,13 +87,24 @@ Homebrew tap.
 
 ## Install via Homebrew
 
-After the release workflow updates the tap:
+After the release workflow updates the tap, end users can install directly:
+
+```bash
+brew install monksvaughan/tap/thin
+thin version
+```
+
+Or tap first, then install:
 
 ```bash
 brew tap monksvaughan/tap
 brew install thin
 thin version
 ```
+
+End users should not need GitHub credentials for either command. If Homebrew
+prompts for a GitHub username while tapping, check that
+`github.com/monksvaughan/homebrew-tap` is public and accessible over HTTPS.
 
 To upgrade later:
 

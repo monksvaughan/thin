@@ -45,18 +45,3 @@ changelog:
       - "^test:"
       - "^chore:"
 
-homebrew_casks:
-  - name: thin
-    ids:
-      - thin
-    repository:
-      owner: monksvaughan
-      name: homebrew-tap
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Casks
-    homepage: https://github.com/monksvaughan/thin
-    description: Low-latency HTTP proxy for reducing input-token usage in AI coding workflows
-    license: FSL-1.1-ALv2
-    binaries:
-      - thin
